@@ -84,9 +84,30 @@ Always implement the **real AWS wire protocol** — never invent custom endpoint
 ## Pull Request Guidelines
 
 - Keep PRs focused — one feature or fix per PR
-- Add or update tests for any changed behavior
-  CI workflow runs automatically on every PR (build and tests must pass)
+- Follow the testing policy below
 - Reference any related issues in the PR description
+
+## Testing Policy for Pull Requests
+
+Floci accepts pull requests only when the test coverage is appropriate for the type of change being proposed.
+
+As a project policy:
+
+- Pull requests that introduce new behavior must include tests that validate that behavior.
+- Pull requests that fix bugs should include a regression test whenever the bug can be covered realistically.
+- Pull requests that modify runtime logic, request handling, persistence behavior, protocol compatibility, or service responses are expected to include updated or additional tests.
+- Pull requests that do not change observable behavior, such as documentation updates, formatting, comments, dependency housekeeping, or low-risk internal refactors, may not require new tests.
+- Even when no new tests are needed, the existing test suite must still pass.
+
+If a pull request does not include new tests, the author should explain why in the PR description. Valid reasons may include:
+
+- no functional behavior changed
+- existing tests already cover the change
+- the change is not meaningfully testable in isolation
+
+Maintainers may request additional or more targeted test coverage before approving a PR.
+
+CI runs automatically on every pull request, and build/test checks must pass before merge.
 
 ## Reporting Security Issues
 
