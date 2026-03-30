@@ -161,7 +161,7 @@ All settings are overridable via environment variables (`FLOCI_` prefix).
 | `FLOCI_DEFAULT_ACCOUNT_ID` | `000000000000` | Default AWS account ID |
 | `FLOCI_BASE_URL` | `http://localhost:4566` | Base URL used in API responses (e.g. SQS QueueUrl) |
 | `FLOCI_HOSTNAME` | *(unset)* | Override hostname in response URLs (for Docker Compose) |
-| `FLOCI_STORAGE_MODE` | `hybrid` | `memory` · `persistent` · `hybrid` · `wal` |
+| `FLOCI_STORAGE_MODE` | `memory` | `memory` · `persistent` · `hybrid` · `wal` |
 | `FLOCI_STORAGE_PERSISTENT_PATH` | `./data` | Data directory |
 
 → Full reference: [configuration docs](https://hectorvent.dev/floci/configuration/application-yml/)
