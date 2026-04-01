@@ -79,6 +79,66 @@ class DynamoDbIntegrationTest {
     }
 
     @Test
+    void createTableWithGsiAndLsi() {
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.CreateTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {
+                    "TableName": "IndexTable",
+                    "KeySchema": [
+                        {"AttributeName": "pk", "KeyType": "HASH"},
+                        {"AttributeName": "sk", "KeyType": "RANGE"}
+                    ],
+                    "AttributeDefinitions": [
+                        {"AttributeName": "pk", "AttributeType": "S"},
+                        {"AttributeName": "sk", "AttributeType": "S"},
+                        {"AttributeName": "gsiPk", "AttributeType": "S"}
+                    ],
+                    "GlobalSecondaryIndexes": [
+                        {
+                            "IndexName": "gsi-1",
+                            "KeySchema": [
+                                {"AttributeName": "gsiPk", "KeyType": "HASH"},
+                                {"AttributeName": "sk", "KeyType": "RANGE"}
+                            ],
+                            "Projection": {"ProjectionType": "ALL"}
+                        }
+                    ],
+                    "LocalSecondaryIndexes": [
+                        {
+                            "IndexName": "lsi-1",
+                            "KeySchema": [
+                                {"AttributeName": "pk", "KeyType": "HASH"},
+                                {"AttributeName": "gsiPk", "KeyType": "RANGE"}
+                            ],
+                            "Projection": {"ProjectionType": "KEYS_ONLY"}
+                        }
+                    ]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("TableDescription.GlobalSecondaryIndexes.size()", equalTo(1))
+            .body("TableDescription.GlobalSecondaryIndexes[0].IndexName", equalTo("gsi-1"))
+            .body("TableDescription.LocalSecondaryIndexes.size()", equalTo(1))
+            .body("TableDescription.LocalSecondaryIndexes[0].IndexName", equalTo("lsi-1"));
+
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DeleteTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "IndexTable"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
     @Order(3)
     void describeTable() {
         given()

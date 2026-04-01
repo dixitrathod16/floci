@@ -1,14 +1,28 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
+import io.restassured.config.EncoderConfig;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 
 @QuarkusTest
 class CloudFormationIntegrationTest {
+
+    private static final String DYNAMODB_CONTENT_TYPE = "application/x-amz-json-1.0";
+
+    @BeforeAll
+    static void configureRestAssured() {
+        RestAssured.config = RestAssured.config().encoderConfig(
+                EncoderConfig.encoderConfig()
+                        .encodeContentTypeAs(DYNAMODB_CONTENT_TYPE, ContentType.TEXT));
+    }
 
     @Test
     void createStack_withS3AndSqs() {
@@ -73,6 +87,79 @@ class CloudFormationIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackName>test-stack</StackName>"))
             .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+    }
+
+    @Test
+    void createStack_withDynamoDbGsiAndLsi() {
+        String template = """
+            {
+                "Resources": {
+                    "MyTable": {
+                        "Type": "AWS::DynamoDB::Table",
+                        "Properties": {
+                            "TableName": "cf-index-table",
+                            "AttributeDefinitions": [
+                                {"AttributeName": "pk", "AttributeType": "S"},
+                                {"AttributeName": "sk", "AttributeType": "S"},
+                                {"AttributeName": "gsiPk", "AttributeType": "S"}
+                            ],
+                            "KeySchema": [
+                                {"AttributeName": "pk", "KeyType": "HASH"},
+                                {"AttributeName": "sk", "KeyType": "RANGE"}
+                            ],
+                            "GlobalSecondaryIndexes": [
+                                {
+                                    "IndexName": "gsi-1",
+                                    "KeySchema": [
+                                        {"AttributeName": "gsiPk", "KeyType": "HASH"},
+                                        {"AttributeName": "sk", "KeyType": "RANGE"}
+                                    ],
+                                    "Projection": {"ProjectionType": "ALL"}
+                                }
+                            ],
+                            "LocalSecondaryIndexes": [
+                                {
+                                    "IndexName": "lsi-1",
+                                    "KeySchema": [
+                                        {"AttributeName": "pk", "KeyType": "HASH"},
+                                        {"AttributeName": "gsiPk", "KeyType": "RANGE"}
+                                    ],
+                                    "Projection": {"ProjectionType": "KEYS_ONLY"}
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+            """;
+
+        // 1. Create Stack
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack")
+            .formParam("StackName", "test-dynamo-index-stack")
+            .formParam("TemplateBody", template)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<StackId>"));
+
+        // 2. Verify GSI and LSI via DescribeTable
+        given()
+            .header("X-Amz-Target", "DynamoDB_20120810.DescribeTable")
+            .contentType(DYNAMODB_CONTENT_TYPE)
+            .body("""
+                {"TableName": "cf-index-table"}
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Table.GlobalSecondaryIndexes.size()", equalTo(1))
+            .body("Table.GlobalSecondaryIndexes[0].IndexName", equalTo("gsi-1"))
+            .body("Table.LocalSecondaryIndexes.size()", equalTo(1))
+            .body("Table.LocalSecondaryIndexes[0].IndexName", equalTo("lsi-1"));
     }
 
     @Test
