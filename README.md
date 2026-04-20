@@ -59,7 +59,7 @@
 | EC2 (VPCs, instances, security groups) | ✅ | ⚠️ Partial |
 | Native binary | ✅ ~40 MB | ❌ |
 
-**Broad AWS coverage. 1,850+ automated compatibility tests. Free forever.**
+**Broad AWS coverage. Free forever.**
 
 ## Architecture Overview
 
@@ -92,6 +92,69 @@ flowchart LR
     Client -->|"HTTP :4566\nAWS wire protocol"| Router
     Containers -->|"Docker API\n+ IAM / SigV4 auth"| Docker
 ```
+
+## Real Docker Integration
+
+Unlike mock-only emulators, Floci runs **real Docker containers** for services where in-process emulation would compromise fidelity — stateful databases, connection-heavy protocols, and runtimes that require native execution. The result is wire-compatible behavior against the actual engine, not a simplified approximation.
+
+| Service | Default Docker image | What's real |
+|---|---|---|
+| **Lambda** | `public.ecr.aws/lambda/<runtime>` | AWS runtime environment, execution model, warm container pool |
+| **ElastiCache** | `valkey/valkey:8` | Full Redis/Valkey protocol, ACL-based IAM auth, SigV4 validation |
+| **RDS (PostgreSQL)** | `postgres:16-alpine` | Real PostgreSQL engine, IAM auth via token, JDBC-compatible |
+| **RDS (MySQL / Aurora)** | `mysql:8.0` | Real MySQL engine, IAM auth, JDBC-compatible |
+| **RDS (MariaDB)** | `mariadb:11` | Real MariaDB engine, IAM auth, JDBC-compatible |
+| **MSK** | `redpandadata/redpanda:latest` | Real Kafka-compatible broker via Redpanda |
+| **ECS** | User-specified in task definition | Actual container lifecycle — start, stop, health checks |
+| **EKS** | `rancher/k3s:latest` | Live Kubernetes API server (k3s), full kubeconfig |
+| **OpenSearch** | `opensearchproject/opensearch:2` | Full OpenSearch engine with REST API |
+| **ECR** | `registry:2` | Real OCI-compatible registry — `docker push` / `docker pull` work natively |
+
+### Lambda runtimes
+
+Floci resolves each Lambda runtime to the corresponding [AWS public ECR image](https://gallery.ecr.aws/lambda):
+
+| Runtime | Image |
+|---|---|
+| `java25` · `java21` · `java17` · `java11` · `java8.al2` · `java8` | `public.ecr.aws/lambda/java:<version>` |
+| `python3.14` · `python3.13` · `python3.12` · `python3.11` · `python3.10` · `python3.9` | `public.ecr.aws/lambda/python:<version>` |
+| `nodejs24.x` · `nodejs22.x` · `nodejs20.x` · `nodejs18.x` · `nodejs16.x` | `public.ecr.aws/lambda/nodejs:<version>` |
+| `ruby3.4` · `ruby3.3` · `ruby3.2` | `public.ecr.aws/lambda/ruby:<version>` |
+| `dotnet10` · `dotnet9` · `dotnet8` · `dotnet6` | `public.ecr.aws/lambda/dotnet:<version>` |
+| `go1.x` | `public.ecr.aws/lambda/go:1` |
+| `provided.al2023` · `provided.al2` · `provided` | `public.ecr.aws/lambda/provided:<variant>` |
+
+Container image functions (package type `Image`) pass the `ImageUri` through directly, with ECR repository URIs rewritten to the local Floci ECR endpoint automatically.
+
+### Requirements
+
+Docker-backed services require the Docker socket to be accessible:
+
+```bash
+docker run -d --name floci \
+  -p 4566:4566 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -u root \
+  hectorvent/floci:latest
+```
+
+In Docker Compose, add the socket volume alongside any other mounts.
+
+### Overriding default images
+
+All default images are configurable via environment variables, useful for pinning versions or using a local mirror:
+
+| Variable | Default |
+|---|---|
+| `FLOCI_SERVICES_ELASTICACHE_DEFAULT_IMAGE` | `valkey/valkey:8` |
+| `FLOCI_SERVICES_RDS_DEFAULT_POSTGRES_IMAGE` | `postgres:16-alpine` |
+| `FLOCI_SERVICES_RDS_DEFAULT_MYSQL_IMAGE` | `mysql:8.0` |
+| `FLOCI_SERVICES_RDS_DEFAULT_MARIADB_IMAGE` | `mariadb:11` |
+| `FLOCI_SERVICES_MSK_DEFAULT_IMAGE` | `redpandadata/redpanda:latest` |
+| `FLOCI_SERVICES_OPENSEARCH_DEFAULT_IMAGE` | `opensearchproject/opensearch:2` |
+| `FLOCI_SERVICES_EKS_DEFAULT_IMAGE` | `rancher/k3s:latest` |
+| `FLOCI_SERVICES_ECR_REGISTRY_IMAGE` | `registry:2` |
+| `FLOCI_ECR_BASE_URI` | `public.ecr.aws` (Lambda runtime base) |
 
 ## Supported Services
 
@@ -450,6 +513,7 @@ Available compatibility test modules:
 | `compat-opentofu` | OpenTofu | v1.9+ | 14 |
 | `compat-cdk` | AWS CDK | v2+ | 17 |
 
+**1,850+ automated compatibility tests across 6 SDKs and 3 IaC tools.**
 
 ## Image Tags
 
@@ -465,7 +529,7 @@ All settings are overridable via environment variables (`FLOCI_` prefix).
 
 | Variable | Default | Description                                                                         |
 |---|---|-------------------------------------------------------------------------------------|
-| `QUARKUS_HTTP_PORT` | `4566` | Port exposed by the Floci API                                                       |
+| `FLOCI_PORT` | `4566` | Port exposed by the Floci API                                                       |
 | `FLOCI_DEFAULT_REGION` | `us-east-1` | Default AWS region                                                                  |
 | `FLOCI_DEFAULT_ACCOUNT_ID` | `000000000000` | Default AWS account ID                                                              |
 | `FLOCI_BASE_URL` | `http://localhost:4566` | Base URL used when Floci returns service URLs (e.g. SQS QueueUrl)                   |

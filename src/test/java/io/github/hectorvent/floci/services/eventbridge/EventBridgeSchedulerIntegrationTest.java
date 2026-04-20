@@ -276,6 +276,8 @@ class EventBridgeSchedulerIntegrationTest {
     private EmulatorConfig createConfig() {
         return new EmulatorConfig() {
             @Override
+            public int port() { return 4566; }
+            @Override
             public String baseUrl() { return "http://localhost:4566"; }
             @Override
             public Optional<String> hostname() { return Optional.empty(); }

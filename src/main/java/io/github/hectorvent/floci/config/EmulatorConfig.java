@@ -7,6 +7,9 @@ import java.util.Optional;
 @ConfigMapping(prefix = "floci")
 public interface EmulatorConfig {
 
+    @WithDefault("4566")
+    int port();
+
     @WithDefault("http://localhost:4566")
     String baseUrl();
 

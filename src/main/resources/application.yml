@@ -1,6 +1,6 @@
 quarkus:
   http:
-    port: 4566
+    port: ${floci.port}
     host: 0.0.0.0
     limits:
       max-body-size: ${floci.max-request-size}M
@@ -22,6 +22,7 @@ quarkus:
       --initialize-at-run-time=io.github.hectorvent.floci.services.cognito.CognitoSrpHelper
 
 floci:
+  port: 4566
   max-request-size: 512
   base-url: "http://localhost:4566"
   # hostname: ""  # When set, overrides the hostname in response URLs (e.g. SQS QueueUrl).
