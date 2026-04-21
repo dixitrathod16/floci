@@ -294,9 +294,13 @@ public class DynamoDbJsonHandler {
             response.set("Attributes", result.newItem());
         } else if ("ALL_OLD" .equals(returnValues) && result.oldItem() != null) {
             response.set("Attributes", result.oldItem());
-        } else if ("UPDATED_NEW".equals(returnValues) && result.oldItem() != null && result.newItem() != null) {
-            response.set("Attributes", getChangedAttributes(result.newItem(), result.oldItem()));
-        } else if ("UPDATED_OLD".equals(returnValues) && result.oldItem() != null && result.newItem() != null) {
+        } else if ("UPDATED_NEW".equals(returnValues) && result.newItem() != null) {
+            // When oldItem is null (new item created), diff against the key so key
+            // attributes are excluded - matching AWS behavior where UPDATED_NEW
+            // returns only the attributes set by the expression.
+            JsonNode baseline = result.oldItem() != null ? result.oldItem() : key;
+            response.set("Attributes", getChangedAttributes(result.newItem(), baseline));
+        } else if ("UPDATED_OLD".equals(returnValues) && result.oldItem() != null) {
             response.set("Attributes", getChangedAttributes(result.oldItem(), result.newItem()));
         }
         addConsumedCapacity(response, request, tableName, 1, true);
