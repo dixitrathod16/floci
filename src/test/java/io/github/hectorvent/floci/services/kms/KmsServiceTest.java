@@ -367,4 +367,50 @@ class KmsServiceTest {
         assertThrows(AwsException.class, () ->
                 kmsService.enableKeyRotation(key.getKeyId(), REGION));
     }
+
+    // ── Issue #497 — HMAC key specs ─────────────────────────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HMAC_224", "HMAC_256", "HMAC_384", "HMAC_512"})
+    void createHmacKey_allSpecs(String spec) {
+        KmsKey key = kmsService.createKey("hmac key", "GENERATE_VERIFY_MAC", spec, null, Map.of(), REGION);
+
+        assertEquals(spec, key.getCustomerMasterKeySpec());
+        assertEquals("GENERATE_VERIFY_MAC", key.getKeyUsage());
+        assertNotNull(key.getPrivateKeyEncoded());
+
+        int expectedBytes = switch (spec) {
+            case "HMAC_224" -> 28;
+            case "HMAC_256" -> 32;
+            case "HMAC_384" -> 48;
+            case "HMAC_512" -> 64;
+            default -> -1;
+        };
+        assertEquals(expectedBytes, Base64.getDecoder().decode(key.getPrivateKeyEncoded()).length);
+
+        KmsKey found = kmsService.describeKey(key.getKeyId(), REGION);
+        assertEquals(spec, found.getCustomerMasterKeySpec());
+    }
+
+    @Test
+    void createHmacKey_requiresGenerateVerifyMacUsage() {
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.createKey("hmac key", "ENCRYPT_DECRYPT", "HMAC_256", null, Map.of(), REGION));
+        assertEquals("ValidationException", ex.getErrorCode());
+    }
+
+    @Test
+    void createSymmetricKey_rejectsGenerateVerifyMacUsage() {
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.createKey("bad", "GENERATE_VERIFY_MAC", "SYMMETRIC_DEFAULT", null, Map.of(), REGION));
+        assertEquals("ValidationException", ex.getErrorCode());
+    }
+
+    @Test
+    void getPublicKeyForHmacKey_throwsUnsupportedOperation() {
+        KmsKey key = kmsService.createKey("hmac key", "GENERATE_VERIFY_MAC", "HMAC_256", null, Map.of(), REGION);
+        AwsException ex = assertThrows(AwsException.class, () ->
+                kmsService.getPublicKey(key.getKeyId(), REGION));
+        assertEquals("UnsupportedOperationException", ex.getErrorCode());
+    }
 }

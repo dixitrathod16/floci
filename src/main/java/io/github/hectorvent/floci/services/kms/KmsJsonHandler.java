@@ -350,6 +350,10 @@ public class KmsJsonHandler {
         node.put("KeyManager", "CUSTOMER");
         node.put("CustomerMasterKeySpec", k.getCustomerMasterKeySpec());
         node.put("KeySpec", k.getCustomerMasterKeySpec());
+        String macAlgo = KmsService.macAlgorithmFor(k.getCustomerMasterKeySpec());
+        if (macAlgo != null) {
+            node.putArray("MacAlgorithms").add(macAlgo);
+        }
         if (k.getDeletionDate() > 0) {
             node.put("DeletionDate", k.getDeletionDate());
         }

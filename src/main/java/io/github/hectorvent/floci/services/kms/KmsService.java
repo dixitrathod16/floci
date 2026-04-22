@@ -81,12 +81,16 @@ public class KmsService {
         String keyId = UUID.randomUUID().toString();
         String arn = regionResolver.buildArn("kms", region, "key/" + keyId);
 
+        String effectiveUsage = keyUsage != null ? keyUsage : "ENCRYPT_DECRYPT";
+        String effectiveSpec = customerMasterKeySpec != null ? customerMasterKeySpec : "SYMMETRIC_DEFAULT";
+        validateKeyUsageForSpec(effectiveUsage, effectiveSpec);
+
         KmsKey key = new KmsKey();
         key.setKeyId(keyId);
         key.setArn(arn);
         key.setDescription(description);
-        key.setKeyUsage(keyUsage != null ? keyUsage : "ENCRYPT_DECRYPT");
-        key.setCustomerMasterKeySpec(customerMasterKeySpec != null ? customerMasterKeySpec : "SYMMETRIC_DEFAULT");
+        key.setKeyUsage(effectiveUsage);
+        key.setCustomerMasterKeySpec(effectiveSpec);
         key.setPolicy(policy != null ? policy : DEFAULT_KEY_POLICY);
         if (tags != null) {
             key.getTags().putAll(tags);
@@ -103,6 +107,14 @@ public class KmsService {
         String spec = key.getCustomerMasterKeySpec();
         if ("SYMMETRIC_DEFAULT".equals(spec)) {
             return; // Use existing mock behavior for symmetric keys
+        }
+        if (isHmac(spec)) {
+            // HMAC keys are symmetric byte strings; generate outside the try block
+            // so ValidationException (400) isn't rewrapped as InternalFailure (500).
+            byte[] material = new byte[hmacKeyByteLength(spec)];
+            new SecureRandom().nextBytes(material);
+            key.setPrivateKeyEncoded(Base64.getEncoder().encodeToString(material));
+            return;
         }
 
         try {
@@ -141,10 +153,53 @@ public class KmsService {
 
     public KmsKey getPublicKey(String keyId, String region) {
         KmsKey key = resolveKey(keyId, region);
-        if ("SYMMETRIC_DEFAULT".equals(key.getCustomerMasterKeySpec())) {
+        String spec = key.getCustomerMasterKeySpec();
+        if ("SYMMETRIC_DEFAULT".equals(spec) || isHmac(spec)) {
             throw new AwsException("UnsupportedOperationException", "GetPublicKey is not supported for symmetric keys.", 400);
         }
         return key;
+    }
+
+    private static boolean isHmac(String spec) {
+        return spec != null && spec.startsWith("HMAC_");
+    }
+
+    private static void validateKeyUsageForSpec(String keyUsage, String spec) {
+        if (isHmac(spec) && !"GENERATE_VERIFY_MAC".equals(keyUsage)) {
+            throw new AwsException("ValidationException",
+                    "KeyUsage " + keyUsage + " is not compatible with KeySpec " + spec
+                            + ". HMAC key specs require KeyUsage GENERATE_VERIFY_MAC.",
+                    400);
+        }
+        if ("GENERATE_VERIFY_MAC".equals(keyUsage) && !isHmac(spec)) {
+            throw new AwsException("ValidationException",
+                    "KeyUsage GENERATE_VERIFY_MAC requires an HMAC KeySpec (HMAC_224, HMAC_256, HMAC_384, or HMAC_512).",
+                    400);
+        }
+    }
+
+    private static int hmacKeyByteLength(String spec) {
+        return switch (spec) {
+            case "HMAC_224" -> 28;
+            case "HMAC_256" -> 32;
+            case "HMAC_384" -> 48;
+            case "HMAC_512" -> 64;
+            default -> throw new AwsException("InvalidCustomerMasterKeySpecException",
+                    "Unsupported HMAC key spec: " + spec, 400);
+        };
+    }
+
+    static String macAlgorithmFor(String spec) {
+        if (!isHmac(spec)) {
+            return null;
+        }
+        return switch (spec) {
+            case "HMAC_224" -> "HMAC_SHA_224";
+            case "HMAC_256" -> "HMAC_SHA_256";
+            case "HMAC_384" -> "HMAC_SHA_384";
+            case "HMAC_512" -> "HMAC_SHA_512";
+            default -> null;
+        };
     }
 
     public KmsKey describeKey(String keyId, String region) {

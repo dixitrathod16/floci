@@ -113,6 +113,23 @@ teardown() {
     aws_cmd kms delete-alias --alias-name "$alias_name" >/dev/null 2>&1 || true
 }
 
+@test "KMS: create HMAC key and describe returns MacAlgorithms" {
+    out=$(aws_cmd kms create-key \
+        --description "bats-hmac-$(unique_name)" \
+        --key-spec HMAC_256 \
+        --key-usage GENERATE_VERIFY_MAC)
+    KEY_ID=$(json_get "$out" '.KeyMetadata.KeyId')
+    [ -n "$KEY_ID" ]
+
+    spec=$(json_get "$out" '.KeyMetadata.KeySpec')
+    [ "$spec" = "HMAC_256" ]
+
+    run aws_cmd kms describe-key --key-id "$KEY_ID"
+    assert_success
+    macs=$(echo "$output" | jq -r '.KeyMetadata.MacAlgorithms[0]')
+    [ "$macs" = "HMAC_SHA_256" ]
+}
+
 @test "KMS: delete alias" {
     out=$(aws_cmd kms create-key --description "bats-test-key")
     KEY_ID=$(json_get "$out" '.KeyMetadata.KeyId')
