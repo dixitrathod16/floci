@@ -47,6 +47,7 @@ public class CognitoJsonHandler {
             case "DescribeUserPoolClient" -> handleDescribeUserPoolClient(request);
             case "ListUserPoolClients" -> handleListUserPoolClients(request);
             case "DeleteUserPoolClient" -> handleDeleteUserPoolClient(request);
+            case "UpdateUserPoolClient" -> handleUpdateUserPoolClient(request);
             case "CreateResourceServer" -> handleCreateResourceServer(request);
             case "DescribeResourceServer" -> handleDescribeResourceServer(request);
             case "ListResourceServers" -> handleListResourceServers(request);
@@ -190,6 +191,20 @@ public class CognitoJsonHandler {
                 request.path("ClientId").asText()
         );
         return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUpdateUserPoolClient(JsonNode request) {
+        UserPoolClient client = service.updateUserPoolClient(
+                request.path("UserPoolId").asText(),
+                request.path("ClientId").asText(),
+                request.has("ClientName") ? request.path("ClientName").asText() : null,
+                request.has("AllowedOAuthFlowsUserPoolClient") ? request.path("AllowedOAuthFlowsUserPoolClient").asBoolean() : null,
+                readStringList(request.path("AllowedOAuthFlows")),
+                readStringList(request.path("AllowedOAuthScopes"))
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.set("UserPoolClient", clientToNode(client));
+        return Response.ok(response).build();
     }
 
     private Response handleCreateResourceServer(JsonNode request) {
