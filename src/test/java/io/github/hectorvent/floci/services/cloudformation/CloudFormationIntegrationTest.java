@@ -2050,4 +2050,80 @@ class CloudFormationIntegrationTest {
         .then()
             .statusCode(404);
     }
+
+    @Test
+    void createChangeSet_describeAndExecuteByArn_succeeds() {
+        // Regression test for: DescribeChangeSet / ExecuteChangeSet fail when called
+        // with a changeset ARN instead of a short name.
+        // The AWS CLI's `aws cloudformation deploy` always passes the full ARN returned
+        // by CreateChangeSet back to DescribeChangeSet and ExecuteChangeSet, so this
+        // path must work for `deploy` to function at all.
+        String template = """
+            {
+              "Resources": {
+                "MyQueue": {
+                  "Type": "AWS::SQS::Queue",
+                  "Properties": { "QueueName": "cfn-cs-arn-queue" }
+                }
+              }
+            }
+            """;
+
+        // 1. CreateChangeSet — returns a changeset ARN in the response
+        String createXml = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateChangeSet")
+            .formParam("StackName", "cfn-cs-arn-stack")
+            .formParam("ChangeSetName", "my-changeset")
+            .formParam("ChangeSetType", "CREATE")
+            .formParam("TemplateBody", template)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<Id>"))
+            .extract().asString();
+
+        // Extract the full changeset ARN from the CreateChangeSet response
+        String changeSetArn = createXml
+            .split("<Id>")[1]
+            .split("</Id>")[0];
+
+        assertThat("CreateChangeSet should return a changeset ARN",
+            changeSetArn, startsWith("arn:aws:cloudformation:"));
+
+        // 2. DescribeChangeSet by ARN — must return Status, not 400
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeChangeSet")
+            .formParam("StackName", "cfn-cs-arn-stack")
+            .formParam("ChangeSetName", changeSetArn)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<Status>CREATE_COMPLETE</Status>"));
+
+        // 3. ExecuteChangeSet by ARN — must succeed and provision the stack
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "ExecuteChangeSet")
+            .formParam("StackName", "cfn-cs-arn-stack")
+            .formParam("ChangeSetName", changeSetArn)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        // 4. Stack should reach CREATE_COMPLETE
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeStacks")
+            .formParam("StackName", "cfn-cs-arn-stack")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+    }
 }

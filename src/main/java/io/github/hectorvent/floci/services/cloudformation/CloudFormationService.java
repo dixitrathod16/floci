@@ -100,7 +100,7 @@ public class CloudFormationService {
 
     public ChangeSet describeChangeSet(String stackName, String changeSetName, String region) {
         Stack stack = getStackOrThrow(stackName, region);
-        ChangeSet cs = stack.getChangeSets().get(changeSetName);
+        ChangeSet cs = stack.getChangeSets().get(resolveChangeSetName(changeSetName));
         if (cs == null) {
             throw new AwsException("ChangeSetNotFoundException",
                     "ChangeSet [" + changeSetName + "] does not exist", 400);
@@ -112,7 +112,7 @@ public class CloudFormationService {
 
     public Future<?> executeChangeSet(String stackName, String changeSetName, String region) {
         Stack stack = getStackOrThrow(stackName, region);
-        ChangeSet cs = stack.getChangeSets().get(changeSetName);
+        ChangeSet cs = stack.getChangeSets().get(resolveChangeSetName(changeSetName));
         if (cs == null) {
             throw new AwsException("ChangeSetNotFoundException",
                     "ChangeSet [" + changeSetName + "] does not exist", 400);
@@ -136,12 +136,13 @@ public class CloudFormationService {
 
     public void deleteChangeSet(String stackName, String changeSetName, String region) {
         Stack stack = getStackOrThrow(stackName, region);
-        ChangeSet cs = stack.getChangeSets().get(changeSetName);
+        String name = resolveChangeSetName(changeSetName);
+        ChangeSet cs = stack.getChangeSets().get(name);
         if (cs == null) {
             throw new AwsException("ChangeSetNotFoundException",
                     "ChangeSet [" + changeSetName + "] does not exist", 400);
         }
-        stack.getChangeSets().remove(changeSetName);
+        stack.getChangeSets().remove(name);
     }
 
     // ── DeleteStack ───────────────────────────────────────────────────────────
@@ -491,6 +492,22 @@ public class CloudFormationService {
                     "Stack with id " + stackNameOrArn + " does not exist", 400);
         }
         return stack;
+    }
+
+    /**
+     * Resolves a changeset name from either a short name or a full ARN.
+     * The AWS CLI passes the full ARN (arn:aws:cloudformation:…:changeSet/<name>/<uuid>)
+     * when referencing a changeset by the ID returned from CreateChangeSet.
+     */
+    private String resolveChangeSetName(String changeSetNameOrArn) {
+        if (changeSetNameOrArn != null && changeSetNameOrArn.startsWith("arn:")) {
+            // arn:aws:cloudformation:<region>:<account>:changeSet/<name>/<uuid>
+            String[] parts = changeSetNameOrArn.split("/");
+            if (parts.length >= 2) {
+                return parts[1];
+            }
+        }
+        return changeSetNameOrArn;
     }
 
     /**
