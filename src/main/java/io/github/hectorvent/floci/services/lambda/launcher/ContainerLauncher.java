@@ -144,6 +144,9 @@ public class ContainerLauncher {
         }
         env.add("AWS_DEFAULT_REGION=us-east-1");
         env.add("AWS_REGION=us-east-1");
+        env.add("AWS_ACCESS_KEY_ID=test");
+        env.add("AWS_SECRET_ACCESS_KEY=test");
+        env.add("AWS_SESSION_TOKEN=test");
         if (fn.getEnvironment() != null) {
             fn.getEnvironment().forEach((k, v) -> env.add(k + "=" + v));
         }
