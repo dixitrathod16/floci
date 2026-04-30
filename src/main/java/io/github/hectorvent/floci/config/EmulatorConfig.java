@@ -715,7 +715,7 @@ public interface EmulatorConfig {
         @WithDefault("k3s")
         String provider();
 
-        @WithDefault("rancher/k3s:latest")
+        @WithDefault("rancher/k3s:v1.33.10-k3s1")
         String defaultImage();
 
         @WithDefault("6500")

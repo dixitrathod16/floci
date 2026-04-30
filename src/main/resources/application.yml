@@ -212,7 +212,7 @@ floci:
       enabled: true
       mock: false
       provider: k3s
-      default-image: "rancher/k3s:latest"
+      default-image: "rancher/k3s:v1.33.10-k3s1"
       api-server-base-port: 6500
       api-server-max-port: 6599
       data-path: ./data/eks
