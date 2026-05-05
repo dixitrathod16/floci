@@ -170,8 +170,14 @@ public class ApiGatewayV2Service {
             auth.setJwtConfiguration(new Authorizer.JwtConfiguration(audience, issuer));
         }
 
+        auth.setAuthorizerUri((String) request.get("authorizerUri"));
+        auth.setAuthorizerPayloadFormatVersion((String) request.get("authorizerPayloadFormatVersion"));
+        if (request.get("authorizerResultTtlInSeconds") != null) {
+            auth.setAuthorizerResultTtlInSeconds(((Number) request.get("authorizerResultTtlInSeconds")).intValue());
+        }
+
         authorizerStore.put(authorizerKey(region, apiId, auth.getAuthorizerId()), auth);
-        LOG.infov("Created JWT authorizer: {0} ({1}) for API {2}", auth.getName(), auth.getAuthorizerId(), apiId);
+        LOG.infov("Created authorizer: {0} ({1}) for API {2}", auth.getName(), auth.getAuthorizerId(), apiId);
         return auth;
     }
 
@@ -217,6 +223,15 @@ public class ApiGatewayV2Service {
             List<String> audience = (List<String>) jwtConfig.get("audience");
             String issuer = (String) jwtConfig.get("issuer");
             auth.setJwtConfiguration(new Authorizer.JwtConfiguration(audience, issuer));
+        }
+        if (request.containsKey("authorizerUri") && request.get("authorizerUri") != null) {
+            auth.setAuthorizerUri((String) request.get("authorizerUri"));
+        }
+        if (request.containsKey("authorizerPayloadFormatVersion") && request.get("authorizerPayloadFormatVersion") != null) {
+            auth.setAuthorizerPayloadFormatVersion((String) request.get("authorizerPayloadFormatVersion"));
+        }
+        if (request.containsKey("authorizerResultTtlInSeconds") && request.get("authorizerResultTtlInSeconds") != null) {
+            auth.setAuthorizerResultTtlInSeconds(((Number) request.get("authorizerResultTtlInSeconds")).intValue());
         }
 
         authorizerStore.put(authorizerKey(region, apiId, authorizerId), auth);
@@ -304,6 +319,20 @@ public class ApiGatewayV2Service {
         return null;
     }
 
+    /**
+     * Finds a route by its exact routeKey (e.g. "$connect", "$disconnect", "$default").
+     * Returns null if no route with the given key exists on the API.
+     */
+    public Route findRouteByKey(String region, String apiId, String routeKey) {
+        List<Route> routes = getRoutes(region, apiId);
+        for (Route r : routes) {
+            if (routeKey.equals(r.getRouteKey())) {
+                return r;
+            }
+        }
+        return null;
+    }
+
     private boolean routeKeyMatchesPath(String routeKey, String httpMethod, String path) {
         int space = routeKey.indexOf(' ');
         if (space < 0) return false;
@@ -335,6 +364,20 @@ public class ApiGatewayV2Service {
         integration.setIntegrationType((String) request.get("integrationType"));
         integration.setIntegrationUri((String) request.get("integrationUri"));
         integration.setPayloadFormatVersion((String) request.getOrDefault("payloadFormatVersion", "2.0"));
+        integration.setIntegrationMethod((String) request.get("integrationMethod"));
+        integration.setTemplateSelectionExpression((String) request.get("templateSelectionExpression"));
+
+        if (request.get("timeoutInMillis") != null) {
+            integration.setTimeoutInMillis(((Number) request.get("timeoutInMillis")).intValue());
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> requestTemplates = (Map<String, String>) request.get("requestTemplates");
+        integration.setRequestTemplates(requestTemplates);
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> responseTemplates = (Map<String, String>) request.get("responseTemplates");
+        integration.setResponseTemplates(responseTemplates);
 
         integrationStore.put(integrationKey(region, apiId, integration.getIntegrationId()), integration);
         return integration;
@@ -368,6 +411,25 @@ public class ApiGatewayV2Service {
         if (request.containsKey("payloadFormatVersion") && request.get("payloadFormatVersion") != null) {
             integration.setPayloadFormatVersion((String) request.get("payloadFormatVersion"));
         }
+        if (request.containsKey("integrationMethod") && request.get("integrationMethod") != null) {
+            integration.setIntegrationMethod((String) request.get("integrationMethod"));
+        }
+        if (request.containsKey("templateSelectionExpression") && request.get("templateSelectionExpression") != null) {
+            integration.setTemplateSelectionExpression((String) request.get("templateSelectionExpression"));
+        }
+        if (request.containsKey("timeoutInMillis") && request.get("timeoutInMillis") != null) {
+            integration.setTimeoutInMillis(((Number) request.get("timeoutInMillis")).intValue());
+        }
+        if (request.containsKey("requestTemplates") && request.get("requestTemplates") != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> requestTemplates = (Map<String, String>) request.get("requestTemplates");
+            integration.setRequestTemplates(requestTemplates);
+        }
+        if (request.containsKey("responseTemplates") && request.get("responseTemplates") != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> responseTemplates = (Map<String, String>) request.get("responseTemplates");
+            integration.setResponseTemplates(responseTemplates);
+        }
 
         integrationStore.put(integrationKey(region, apiId, integrationId), integration);
         return integration;
@@ -383,6 +445,10 @@ public class ApiGatewayV2Service {
         stage.setAutoDeploy(Boolean.parseBoolean(String.valueOf(request.getOrDefault("autoDeploy", "false"))));
         stage.setCreatedDate(System.currentTimeMillis());
         stage.setLastUpdatedDate(System.currentTimeMillis());
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> stageVariables = (Map<String, String>) request.get("stageVariables");
+        stage.setStageVariables(stageVariables);
 
         stageStore.put(stageKey(region, apiId, stage.getStageName()), stage);
         LOG.infov("Created stage: {0} for API {1}", stage.getStageName(), apiId);
@@ -413,6 +479,11 @@ public class ApiGatewayV2Service {
         }
         if (request.containsKey("autoDeploy") && request.get("autoDeploy") != null) {
             stage.setAutoDeploy(Boolean.parseBoolean(String.valueOf(request.get("autoDeploy"))));
+        }
+        if (request.containsKey("stageVariables") && request.get("stageVariables") != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> stageVariables = (Map<String, String>) request.get("stageVariables");
+            stage.setStageVariables(stageVariables);
         }
 
         stage.setLastUpdatedDate(System.currentTimeMillis());

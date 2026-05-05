@@ -1578,6 +1578,23 @@ public class ApiGatewayController {
         node.put("integrationType", i.getIntegrationType());
         node.put("payloadFormatVersion", i.getPayloadFormatVersion());
         if (i.getIntegrationUri() != null) node.put("integrationUri", i.getIntegrationUri());
+        if (i.getRequestTemplates() != null) {
+            ObjectNode requestTemplates = node.putObject("requestTemplates");
+            i.getRequestTemplates().forEach(requestTemplates::put);
+        }
+        if (i.getResponseTemplates() != null) {
+            ObjectNode responseTemplates = node.putObject("responseTemplates");
+            i.getResponseTemplates().forEach(responseTemplates::put);
+        }
+        if (i.getTemplateSelectionExpression() != null) {
+            node.put("templateSelectionExpression", i.getTemplateSelectionExpression());
+        }
+        if (i.getIntegrationMethod() != null) {
+            node.put("integrationMethod", i.getIntegrationMethod());
+        }
+        if (i.getTimeoutInMillis() != 0) {
+            node.put("timeoutInMillis", i.getTimeoutInMillis());
+        }
         return node;
     }
 
@@ -1588,6 +1605,10 @@ public class ApiGatewayController {
         node.put("autoDeploy", s.isAutoDeploy());
         node.put("createdDate", java.time.Instant.ofEpochMilli(s.getCreatedDate()).toString());
         node.put("lastUpdatedDate", java.time.Instant.ofEpochMilli(s.getLastUpdatedDate()).toString());
+        if (s.getStageVariables() != null) {
+            ObjectNode stageVariables = node.putObject("stageVariables");
+            s.getStageVariables().forEach(stageVariables::put);
+        }
         return node;
     }
 
@@ -1618,6 +1639,15 @@ public class ApiGatewayController {
             if (a.getJwtConfiguration().issuer() != null) {
                 jwt.put("issuer", a.getJwtConfiguration().issuer());
             }
+        }
+        if (a.getAuthorizerUri() != null) {
+            node.put("authorizerUri", a.getAuthorizerUri());
+        }
+        if (a.getAuthorizerPayloadFormatVersion() != null) {
+            node.put("authorizerPayloadFormatVersion", a.getAuthorizerPayloadFormatVersion());
+        }
+        if (a.getAuthorizerResultTtlInSeconds() != null) {
+            node.put("authorizerResultTtlInSeconds", a.getAuthorizerResultTtlInSeconds());
         }
         return node;
     }

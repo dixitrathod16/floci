@@ -95,4 +95,51 @@ class LambdaArnUtilsTest {
     private static String emptyToNull(String s) {
         return (s == null || s.isEmpty()) ? null : s;
     }
+
+    // ──────────────────────────── extractFunctionNameFromUri tests ────────────────────────────
+
+    @ParameterizedTest
+    @CsvSource({
+            // input URI, expected function name
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations, myFn",
+            "arn:aws:lambda:us-east-1:000000000000:function:myFn, myFn",
+            "arn:aws:lambda:eu-west-1:123456789012:function:my-handler/invocations, my-handler",
+            "arn:aws:lambda:us-east-1:000000000000:function:my_fn-2/invocations, my_fn-2",
+            "myFn, myFn",
+            "my-handler, my-handler",
+    })
+    void extractFunctionNameFromUri_validInputs(String uri, String expectedName) {
+        assertEquals(expectedName, LambdaArnUtils.extractFunctionNameFromUri(uri));
+    }
+
+    @Test
+    void extractFunctionNameFromUri_nullReturnsNull() {
+        assertNull(LambdaArnUtils.extractFunctionNameFromUri(null));
+    }
+
+    @Test
+    void extractFunctionNameFromUri_noFunctionPrefixReturnsFull() {
+        // When no "function:" prefix, the entire URI is treated as the function name
+        assertEquals("just-a-name", LambdaArnUtils.extractFunctionNameFromUri("just-a-name"));
+    }
+
+    @Test
+    void extractFunctionNameFromUri_stripsInvocationsSuffix() {
+        String uri = "arn:aws:lambda:us-east-1:000000000000:function:handler/invocations";
+        assertEquals("handler", LambdaArnUtils.extractFunctionNameFromUri(uri));
+    }
+
+    @Test
+    void extractFunctionNameFromUri_handlesStageVariableSubstitutedUri() {
+        // After stage variable substitution, the URI looks like a normal ARN
+        String uri = "arn:aws:lambda:us-east-1:000000000000:function:ws-stage-var-fn/invocations";
+        assertEquals("ws-stage-var-fn", LambdaArnUtils.extractFunctionNameFromUri(uri));
+    }
+
+    @Test
+    void extractFunctionNameFromUri_handlesApiGatewayStyleUri() {
+        // API Gateway v1 uses a longer URI format
+        String uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations";
+        assertEquals("myFn", LambdaArnUtils.extractFunctionNameFromUri(uri));
+    }
 }

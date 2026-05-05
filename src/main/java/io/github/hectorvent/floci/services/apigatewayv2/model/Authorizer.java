@@ -13,6 +13,9 @@ public class Authorizer {
     private String name;
     private JwtConfiguration jwtConfiguration;
     private List<String> identitySource;
+    private String authorizerUri;
+    private String authorizerPayloadFormatVersion;
+    private Integer authorizerResultTtlInSeconds;
 
     public Authorizer() {}
 
@@ -30,6 +33,15 @@ public class Authorizer {
 
     public List<String> getIdentitySource() { return identitySource; }
     public void setIdentitySource(List<String> identitySource) { this.identitySource = identitySource; }
+
+    public String getAuthorizerUri() { return authorizerUri; }
+    public void setAuthorizerUri(String authorizerUri) { this.authorizerUri = authorizerUri; }
+
+    public String getAuthorizerPayloadFormatVersion() { return authorizerPayloadFormatVersion; }
+    public void setAuthorizerPayloadFormatVersion(String authorizerPayloadFormatVersion) { this.authorizerPayloadFormatVersion = authorizerPayloadFormatVersion; }
+
+    public Integer getAuthorizerResultTtlInSeconds() { return authorizerResultTtlInSeconds; }
+    public void setAuthorizerResultTtlInSeconds(Integer authorizerResultTtlInSeconds) { this.authorizerResultTtlInSeconds = authorizerResultTtlInSeconds; }
 
     @RegisterForReflection
     public record JwtConfiguration(List<String> audience, String issuer) {}

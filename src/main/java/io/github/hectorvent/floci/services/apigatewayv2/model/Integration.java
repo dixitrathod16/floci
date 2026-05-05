@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.apigatewayv2.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Integration {
@@ -12,6 +14,9 @@ public class Integration {
     private String payloadFormatVersion; // 1.0, 2.0
     private String integrationMethod;
     private int timeoutInMillis;
+    private Map<String, String> requestTemplates;
+    private Map<String, String> responseTemplates;
+    private String templateSelectionExpression;
 
     public Integration() {}
 
@@ -32,4 +37,13 @@ public class Integration {
 
     public int getTimeoutInMillis() { return timeoutInMillis; }
     public void setTimeoutInMillis(int timeoutInMillis) { this.timeoutInMillis = timeoutInMillis; }
+
+    public Map<String, String> getRequestTemplates() { return requestTemplates; }
+    public void setRequestTemplates(Map<String, String> requestTemplates) { this.requestTemplates = requestTemplates; }
+
+    public Map<String, String> getResponseTemplates() { return responseTemplates; }
+    public void setResponseTemplates(Map<String, String> responseTemplates) { this.responseTemplates = responseTemplates; }
+
+    public String getTemplateSelectionExpression() { return templateSelectionExpression; }
+    public void setTemplateSelectionExpression(String templateSelectionExpression) { this.templateSelectionExpression = templateSelectionExpression; }
 }

@@ -25,11 +25,15 @@
     "@aws-sdk/client-sns": "^3.500.0",
     "@aws-sdk/client-sqs": "^3.500.0",
     "@aws-sdk/client-ssm": "^3.500.0",
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.500.0",
     "@aws-sdk/client-sts": "^3.500.0",
-    "selfsigned": "^5.5.0"
+    "selfsigned": "^5.5.0",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.0.0",
+    "esbuild": "^0.21.0",
     "typescript": "^5.4.0",
     "vitest": "^2.0.0"
   }

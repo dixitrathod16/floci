@@ -3,6 +3,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { buildSync } from 'esbuild';
 
 export const ENDPOINT = process.env.FLOCI_ENDPOINT || 'http://localhost:4566';
 export const REGION = process.env.AWS_DEFAULT_REGION || 'us-east-1';
@@ -108,4 +112,43 @@ function crc32(buf: Buffer): number {
     crc = (crc >>> 8) ^ crcTable[(crc ^ buf[i]) & 0xff];
   }
   return (crc ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Build a Lambda ZIP with all dependencies bundled via esbuild.
+ *
+ * Use this when the handler code requires npm packages (e.g. @aws-sdk/client-apigatewaymanagementapi).
+ * esbuild resolves imports from the test project's node_modules and inlines everything into a single
+ * CommonJS file, which is then zipped using buildMinimalZip.
+ *
+ * This avoids maintaining a separate folder with its own package.json/node_modules.
+ */
+export function buildBundledZip(handlerCode: string): Buffer {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'lambda-bundle-'));
+  const entryFile = join(tmpDir, 'index.js');
+  const outFile = join(tmpDir, 'bundle.js');
+
+  // Resolve node_modules from the test project root (where this file lives)
+  const projectRoot = join(import.meta.dirname, '..');
+  const nodeModulesPath = join(projectRoot, 'node_modules');
+
+  try {
+    writeFileSync(entryFile, handlerCode);
+
+    buildSync({
+      entryPoints: [entryFile],
+      bundle: true,
+      platform: 'node',
+      target: 'node22',
+      outfile: outFile,
+      format: 'cjs',
+      minify: false,
+      nodePaths: [nodeModulesPath],
+    });
+
+    const bundled = readFileSync(outFile);
+    return buildMinimalZip('index.js', bundled);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 }

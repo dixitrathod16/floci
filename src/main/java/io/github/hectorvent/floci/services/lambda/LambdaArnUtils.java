@@ -161,4 +161,39 @@ public final class LambdaArnUtils {
     private static AwsException invalid(String message) {
         return new AwsException("InvalidParameterValueException", message, 400);
     }
+
+    /**
+     * Extracts the Lambda function name from an API Gateway integration URI.
+     * Handles formats like:
+     * <ul>
+     *   <li>{@code arn:aws:lambda:us-east-1:000000000000:function:myFn/invocations}</li>
+     *   <li>{@code arn:aws:lambda:us-east-1:000000000000:function:myFn}</li>
+     *   <li>{@code myFn} (bare function name)</li>
+     * </ul>
+     *
+     * @param uri the integration URI (may be null)
+     * @return the extracted function name, or null if the URI is null or unparseable
+     */
+    public static String extractFunctionNameFromUri(String uri) {
+        if (uri == null) {
+            return null;
+        }
+        int idx = uri.indexOf("function:");
+        if (idx < 0) {
+            // No "function:" prefix — treat the entire URI as the function name
+            return uri;
+        }
+        String after = uri.substring(idx + "function:".length());
+        // Handle nested ARN case (shouldn't normally occur but be defensive)
+        if (after.startsWith("arn:")) {
+            int fnIdx = after.lastIndexOf(":function:");
+            if (fnIdx < 0) {
+                return null;
+            }
+            after = after.substring(fnIdx + ":function:".length());
+        }
+        // Strip trailing "/invocations" or any path suffix
+        int slash = after.indexOf('/');
+        return slash >= 0 ? after.substring(0, slash) : after;
+    }
 }

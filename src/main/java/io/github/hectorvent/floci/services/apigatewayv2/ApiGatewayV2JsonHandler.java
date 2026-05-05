@@ -530,6 +530,15 @@ public class ApiGatewayV2JsonHandler {
                 auth.getJwtConfiguration().audience().forEach(aud::add);
             }
         }
+        if (auth.getAuthorizerUri() != null) {
+            node.put("AuthorizerUri", auth.getAuthorizerUri());
+        }
+        if (auth.getAuthorizerPayloadFormatVersion() != null) {
+            node.put("AuthorizerPayloadFormatVersion", auth.getAuthorizerPayloadFormatVersion());
+        }
+        if (auth.getAuthorizerResultTtlInSeconds() != null) {
+            node.put("AuthorizerResultTtlInSeconds", auth.getAuthorizerResultTtlInSeconds());
+        }
         return node;
     }
 
@@ -552,6 +561,23 @@ public class ApiGatewayV2JsonHandler {
         node.put("IntegrationType", i.getIntegrationType());
         node.put("PayloadFormatVersion", i.getPayloadFormatVersion());
         if (i.getIntegrationUri() != null) node.put("IntegrationUri", i.getIntegrationUri());
+        if (i.getRequestTemplates() != null) {
+            ObjectNode requestTemplates = node.putObject("RequestTemplates");
+            i.getRequestTemplates().forEach(requestTemplates::put);
+        }
+        if (i.getResponseTemplates() != null) {
+            ObjectNode responseTemplates = node.putObject("ResponseTemplates");
+            i.getResponseTemplates().forEach(responseTemplates::put);
+        }
+        if (i.getTemplateSelectionExpression() != null) {
+            node.put("TemplateSelectionExpression", i.getTemplateSelectionExpression());
+        }
+        if (i.getIntegrationMethod() != null) {
+            node.put("IntegrationMethod", i.getIntegrationMethod());
+        }
+        if (i.getTimeoutInMillis() != 0) {
+            node.put("TimeoutInMillis", i.getTimeoutInMillis());
+        }
         return node;
     }
 
@@ -562,6 +588,10 @@ public class ApiGatewayV2JsonHandler {
         node.put("CreatedDate", s.getCreatedDate() / 1000.0);
         node.put("LastUpdatedDate", s.getLastUpdatedDate() / 1000.0);
         if (s.getDeploymentId() != null) node.put("DeploymentId", s.getDeploymentId());
+        if (s.getStageVariables() != null) {
+            ObjectNode stageVariables = node.putObject("StageVariables");
+            s.getStageVariables().forEach(stageVariables::put);
+        }
         return node;
     }
 

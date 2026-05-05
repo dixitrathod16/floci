@@ -3,6 +3,8 @@ package io.github.hectorvent.floci.services.apigatewayv2.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Stage {
@@ -11,6 +13,7 @@ public class Stage {
     private boolean autoDeploy;
     private long createdDate;
     private long lastUpdatedDate;
+    private Map<String, String> stageVariables;
 
     public Stage() {}
 
@@ -28,4 +31,7 @@ public class Stage {
 
     public long getLastUpdatedDate() { return lastUpdatedDate; }
     public void setLastUpdatedDate(long lastUpdatedDate) { this.lastUpdatedDate = lastUpdatedDate; }
+
+    public Map<String, String> getStageVariables() { return stageVariables; }
+    public void setStageVariables(Map<String, String> stageVariables) { this.stageVariables = stageVariables; }
 }

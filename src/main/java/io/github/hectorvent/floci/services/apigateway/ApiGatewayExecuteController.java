@@ -10,6 +10,9 @@ import io.github.hectorvent.floci.services.apigateway.model.MethodConfig;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Authorizer;
 import io.github.hectorvent.floci.services.apigatewayv2.model.Route;
+import io.github.hectorvent.floci.services.apigatewayv2.websocket.ConnectionInfo;
+import io.github.hectorvent.floci.services.apigatewayv2.websocket.WebSocketConnectionManager;
+import io.github.hectorvent.floci.services.lambda.LambdaArnUtils;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
@@ -23,7 +26,9 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.*;
 import org.jboss.logging.Logger;
 
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -55,12 +60,14 @@ public class ApiGatewayExecuteController {
     private final ObjectMapper objectMapper;
     private final VtlTemplateEngine vtlEngine;
     private final AwsServiceRouter serviceRouter;
+    private final WebSocketConnectionManager webSocketConnectionManager;
 
     @Inject
     public ApiGatewayExecuteController(ApiGatewayService apiGatewayService, ApiGatewayV2Service apiGatewayV2Service,
                                        LambdaService lambdaService, RegionResolver regionResolver,
                                        ObjectMapper objectMapper, VtlTemplateEngine vtlEngine,
-                                       AwsServiceRouter serviceRouter) {
+                                       AwsServiceRouter serviceRouter,
+                                       WebSocketConnectionManager webSocketConnectionManager) {
         this.apiGatewayService = apiGatewayService;
         this.apiGatewayV2Service = apiGatewayV2Service;
         this.lambdaService = lambdaService;
@@ -68,9 +75,69 @@ public class ApiGatewayExecuteController {
         this.objectMapper = objectMapper;
         this.vtlEngine = vtlEngine;
         this.serviceRouter = serviceRouter;
+        this.webSocketConnectionManager = webSocketConnectionManager;
     }
 
     private record AuthorizerResult(Response errorResponse, String principalId, Map<String, Object> context) {}
+
+    // ──────────────────────────── @connections API ────────────────────────────
+
+    private static final String CONNECTIONS_PREFIX = "@connections/";
+
+    private String decodeConnectionId(String rawConnectionId) {
+        return URLDecoder.decode(rawConnectionId, StandardCharsets.UTF_8);
+    }
+
+    /** Maximum payload size for @connections POST (128 KB, matching AWS limit). */
+    private static final int MAX_CONNECTIONS_PAYLOAD_BYTES = 128 * 1024;
+
+    private Response handlePostToConnection(String connectionId, byte[] body) {
+        if (body != null && body.length > MAX_CONNECTIONS_PAYLOAD_BYTES) {
+            return Response.status(413)
+                    .entity("{\"message\":\"Payload too large\",\"__type\":\"PayloadTooLargeException\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+        try {
+            webSocketConnectionManager.sendMessage(connectionId, new String(body, StandardCharsets.UTF_8));
+            return Response.ok().build();
+        } catch (IllegalStateException e) {
+            return Response.status(410)
+                    .entity("{\"message\":\"GoneException\",\"__type\":\"GoneException\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+    }
+
+    private Response handleGetConnectionInfo(String connectionId) {
+        ConnectionInfo info = webSocketConnectionManager.getConnectionInfo(connectionId);
+        if (info == null) {
+            return Response.status(410)
+                    .entity("{\"message\":\"GoneException\",\"__type\":\"GoneException\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+        String connectedAt = Instant.ofEpochMilli(info.getConnectedAt()).toString();
+        String lastActiveAt = Instant.ofEpochMilli(info.getLastActiveAt()).toString();
+        String sourceIp = info.getSourceIp() != null ? info.getSourceIp() : "127.0.0.1";
+        String userAgent = info.getUserAgent() != null ? info.getUserAgent() : "";
+        String responseBody = String.format(
+                "{\"connectedAt\":\"%s\",\"lastActiveAt\":\"%s\",\"identity\":{\"sourceIp\":\"%s\",\"userAgent\":\"%s\"}}",
+                connectedAt, lastActiveAt, sourceIp, userAgent);
+        return Response.ok(responseBody).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    private Response handleDeleteConnection(String connectionId) {
+        try {
+            webSocketConnectionManager.closeConnection(connectionId);
+            return Response.noContent().build();
+        } catch (IllegalStateException e) {
+            return Response.status(410)
+                    .entity("{\"message\":\"GoneException\",\"__type\":\"GoneException\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build();
+        }
+    }
 
     @GET
     @Path("/{proxy: .*}")
@@ -78,6 +145,10 @@ public class ApiGatewayExecuteController {
                               @PathParam("apiId") String apiId,
                               @PathParam("stageName") String stageName,
                               @PathParam("proxy") String proxy) {
+        if (proxy != null && proxy.startsWith(CONNECTIONS_PREFIX)) {
+            String connectionId = decodeConnectionId(proxy.substring(CONNECTIONS_PREFIX.length()));
+            return handleGetConnectionInfo(connectionId);
+        }
         return dispatch("GET", apiId, stageName, proxy, headers, uriInfo, null);
     }
 
@@ -88,6 +159,10 @@ public class ApiGatewayExecuteController {
                                @PathParam("stageName") String stageName,
                                @PathParam("proxy") String proxy,
                                byte[] body) {
+        if (proxy != null && proxy.startsWith(CONNECTIONS_PREFIX)) {
+            String connectionId = decodeConnectionId(proxy.substring(CONNECTIONS_PREFIX.length()));
+            return handlePostToConnection(connectionId, body);
+        }
         return dispatch("POST", apiId, stageName, proxy, headers, uriInfo, body);
     }
 
@@ -107,6 +182,10 @@ public class ApiGatewayExecuteController {
                                  @PathParam("apiId") String apiId,
                                  @PathParam("stageName") String stageName,
                                  @PathParam("proxy") String proxy) {
+        if (proxy != null && proxy.startsWith(CONNECTIONS_PREFIX)) {
+            String connectionId = decodeConnectionId(proxy.substring(CONNECTIONS_PREFIX.length()));
+            return handleDeleteConnection(connectionId);
+        }
         return dispatch("DELETE", apiId, stageName, proxy, headers, uriInfo, null);
     }
 
@@ -391,29 +470,10 @@ public class ApiGatewayExecuteController {
     /**
      * Extracts function name from integration URI like
      * {@code arn:aws:apigateway:...:lambda:path/2015-03-31/functions/{fnArn}/invocations}.
+     * Delegates to {@link LambdaArnUtils#extractFunctionNameFromUri(String)}.
      */
     private String functionNameFromUri(String uri) {
-        if (uri == null) {
-            return null;
-        }
-        // URI contains "function:{name}" or "function:{arn}"
-        int idx = uri.indexOf("function:");
-        if (idx < 0) {
-            return null;
-        }
-        String after = uri.substring(idx + "function:".length());
-        // after may be "myFn/invocations" or "arn:aws:lambda:...:function:myFn/invocations"
-        // If it starts with "arn:" recurse on the remaining ARN
-        if (after.startsWith("arn:")) {
-            int fnIdx = after.lastIndexOf(":function:");
-            if (fnIdx < 0) {
-                return null;
-            }
-            after = after.substring(fnIdx + ":function:".length());
-        }
-        // Strip trailing "/invocations" or any path suffix
-        int slash = after.indexOf('/');
-        return slash >= 0 ? after.substring(0, slash) : after;
+        return LambdaArnUtils.extractFunctionNameFromUri(uri);
     }
 
     private String buildProxyEvent(String httpMethod, String path, String proxy,
