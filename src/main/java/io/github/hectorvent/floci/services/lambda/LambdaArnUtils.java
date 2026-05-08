@@ -178,22 +178,24 @@ public final class LambdaArnUtils {
         if (uri == null) {
             return null;
         }
-        int idx = uri.indexOf("function:");
-        if (idx < 0) {
-            // No "function:" prefix — treat the entire URI as the function name
+        try {
+            // Parse as a full ARN — resource is "function:myFn" or "function:myFn/invocations"
+            String resource = AwsArnUtils.parse(uri).resource();
+            String[] parts = resource.split("/");
+            // API Gateway v1 style: resource is "path/2015-03-31/functions/{lambdaArn}/invocations"
+            // In this case recurse on the embedded Lambda ARN
+            if (parts.length >= 4 && "path".equals(parts[0]) && "functions".equals(parts[2])) {
+                // parts[3] onwards is the embedded Lambda ARN
+                String embeddedArn = String.join("/", java.util.Arrays.copyOfRange(parts, 3, parts.length));
+                return extractFunctionNameFromUri(embeddedArn);
+            }
+            // Standard Lambda ARN: parts[0] is "function:myFn", strip the "function:" prefix
+            String functionPart = parts[0];
+            int colon = functionPart.lastIndexOf(':');
+            return colon >= 0 ? functionPart.substring(colon + 1) : functionPart;
+        } catch (IllegalArgumentException e) {
+            // Not a valid ARN — treat the entire URI as the function name
             return uri;
         }
-        String after = uri.substring(idx + "function:".length());
-        // Handle nested ARN case (shouldn't normally occur but be defensive)
-        if (after.startsWith("arn:")) {
-            int fnIdx = after.lastIndexOf(":function:");
-            if (fnIdx < 0) {
-                return null;
-            }
-            after = after.substring(fnIdx + ":function:".length());
-        }
-        // Strip trailing "/invocations" or any path suffix
-        int slash = after.indexOf('/');
-        return slash >= 0 ? after.substring(0, slash) : after;
     }
 }
