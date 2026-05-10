@@ -8,6 +8,7 @@ COPY tsconfig.json vitest.config.ts ./
 COPY tests/ tests/
 
 ENV FLOCI_ENDPOINT=http://floci:4566
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 ENV TEST_RESULTS_DIR=/results
 
 RUN mkdir -p /results

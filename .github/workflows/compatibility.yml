@@ -97,6 +97,7 @@ jobs:
             -e FLOCI_SERVICES_DOCKER_NETWORK=compat-net \
             -e FLOCI_HOSTNAME=floci \
             -e FLOCI_SERVICES_LAMBDA_HOT_RELOAD_ENABLED=true \
+            -e FLOCI_TLS_ENABLED=true \
             floci:test
 
       - name: Wait for floci to be ready

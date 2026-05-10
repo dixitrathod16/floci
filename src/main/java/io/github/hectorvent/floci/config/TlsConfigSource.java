@@ -102,9 +102,16 @@ public class TlsConfigSource implements ConfigSource {
 
         properties.put("quarkus.http.ssl.certificate.files", certPath);
         properties.put("quarkus.http.ssl.certificate.key-files", keyPath);
+        // When TLS is enabled, Quarkus HTTP and HTTPS run on internal ports.
+        // A TlsProxyServer (NetServer) listens on the public Floci port (4566)
+        // and does protocol detection to route HTTP and HTTPS to the correct backend.
         properties.put("quarkus.http.insecure-requests", "enabled");
+        properties.put("quarkus.http.host", "127.0.0.1");
+        properties.put("quarkus.http.port", "4510");
+        properties.put("quarkus.http.ssl-port", "4511");
 
-        LOG.infov("TLS: HTTPS enabled (HTTP+HTTPS dual mode), cert={0}", certPath);
+        LOG.infov("TLS: HTTPS enabled — proxy will listen on port {0} (HTTP+HTTPS), cert={1}",
+                resolveProperty("floci.port", "4566"), certPath);
     }
 
     @Override

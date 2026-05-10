@@ -59,3 +59,30 @@ docker run --rm --network host floci-sdk-node
 # Custom endpoint (macOS/Windows)
 docker run --rm -e FLOCI_ENDPOINT=http://host.docker.internal:4566 floci-sdk-node
 ```
+
+## TLS Tests
+
+The `tls.test.ts` file tests HTTPS connectivity with AWS SDK v3 clients.
+The `apigatewayv2-websocket-tls.test.ts` file tests WebSocket over TLS (WSS),
+covering connect/disconnect, route selection, broadcast, authorization,
+`@connections` API, binary frames, and payload limits.
+
+These tests always run as part of the suite — they derive the HTTPS/WSS endpoint
+from the HTTP endpoint by swapping the scheme (`http://floci:4566` → `https://floci:4566`,
+`ws://` → `wss://`).
+
+Since Floci serves HTTP and HTTPS simultaneously when TLS is enabled, existing HTTP
+tests are unaffected.
+
+The Dockerfile sets `NODE_TLS_REJECT_UNAUTHORIZED=0` so self-signed certs are accepted.
+The CI workflow starts Floci with `FLOCI_TLS_ENABLED=true`.
+
+To run locally:
+
+```bash
+# 1. Start Floci with TLS enabled
+FLOCI_TLS_ENABLED=true ./mvnw quarkus:dev
+
+# 2. Run all tests (including TLS)
+NODE_TLS_REJECT_UNAUTHORIZED=0 npm test
+```

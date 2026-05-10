@@ -4,10 +4,13 @@
  * Verifies that AWS SDK v3 clients can interact with floci over HTTPS
  * when TLS is enabled with a self-signed certificate.
  *
+ * These tests run within the existing test suite. Since Floci serves HTTP
+ * and HTTPS simultaneously, existing HTTP tests are unaffected. The HTTPS
+ * endpoint is derived from the HTTP endpoint by swapping the scheme.
+ *
  * Prerequisites:
- *   - Start floci with FLOCI_TLS_ENABLED=true FLOCI_TLS_SELF_SIGNED=true
- *   - Set FLOCI_ENDPOINT=https://localhost:4566
- *   - Run: NODE_TLS_REJECT_UNAUTHORIZED=0 npx vitest run tests/tls.test.ts
+ *   - Floci must be started with FLOCI_TLS_ENABLED=true
+ *   - NODE_TLS_REJECT_UNAUTHORIZED=0 must be set in the test environment
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -32,16 +35,30 @@ import {
   DeleteObjectCommand,
   DeleteBucketCommand,
 } from '@aws-sdk/client-s3';
-import { makeClient, uniqueName, ENDPOINT, ACCOUNT, REGION } from './setup';
+import { ENDPOINT, uniqueName, ACCOUNT, REGION, CREDS } from './setup';
 
-// Guard: skip all tests if endpoint is not HTTPS
-const isTlsEndpoint = ENDPOINT.startsWith('https://');
+// Derive the HTTPS endpoint from the HTTP endpoint by swapping the scheme.
+// When TLS is enabled, Floci serves HTTPS on port 4566 (same port as HTTP without TLS).
+const HTTPS_ENDPOINT = ENDPOINT.replace(/^http:\/\//, 'https://');
 
-describe.skipIf(!isTlsEndpoint)('TLS — STS over HTTPS', () => {
+const TLS_CLIENT_CONFIG = {
+  endpoint: HTTPS_ENDPOINT,
+  region: REGION,
+  credentials: CREDS,
+  forcePathStyle: true,
+};
+
+function makeTlsClient<T>(
+  ClientClass: new (config: typeof TLS_CLIENT_CONFIG) => T,
+): T {
+  return new ClientClass(TLS_CLIENT_CONFIG);
+}
+
+describe('TLS — STS over HTTPS', () => {
   let sts: STSClient;
 
   beforeAll(() => {
-    sts = makeClient(STSClient);
+    sts = makeTlsClient(STSClient);
   });
 
   it('should call GetCallerIdentity over HTTPS', async () => {
@@ -51,12 +68,12 @@ describe.skipIf(!isTlsEndpoint)('TLS — STS over HTTPS', () => {
   });
 });
 
-describe.skipIf(!isTlsEndpoint)('TLS — SQS over HTTPS', () => {
+describe('TLS — SQS over HTTPS', () => {
   let sqs: SQSClient;
   let queueUrl: string;
 
   beforeAll(() => {
-    sqs = makeClient(SQSClient);
+    sqs = makeTlsClient(SQSClient);
   });
 
   afterAll(async () => {
@@ -88,12 +105,12 @@ describe.skipIf(!isTlsEndpoint)('TLS — SQS over HTTPS', () => {
   });
 });
 
-describe.skipIf(!isTlsEndpoint)('TLS — SSM over HTTPS', () => {
+describe('TLS — SSM over HTTPS', () => {
   let ssm: SSMClient;
   const paramName = `/${uniqueName('tls-param')}`;
 
   beforeAll(() => {
-    ssm = makeClient(SSMClient);
+    ssm = makeTlsClient(SSMClient);
   });
 
   afterAll(async () => {
@@ -120,13 +137,13 @@ describe.skipIf(!isTlsEndpoint)('TLS — SSM over HTTPS', () => {
   });
 });
 
-describe.skipIf(!isTlsEndpoint)('TLS — S3 over HTTPS', () => {
+describe('TLS — S3 over HTTPS', () => {
   let s3: S3Client;
   const bucketName = uniqueName('tls-s3');
   const key = 'test-object.txt';
 
   beforeAll(async () => {
-    s3 = makeClient(S3Client);
+    s3 = makeTlsClient(S3Client);
     await s3.send(new CreateBucketCommand({ Bucket: bucketName }));
   });
 
