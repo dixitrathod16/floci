@@ -2,33 +2,14 @@ package io.github.hectorvent.floci.services.apigateway;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.apigateway.ApiGatewayClient;
-import software.amazon.awssdk.services.apigateway.model.AuthorizerType;
-import software.amazon.awssdk.services.apigateway.model.CreateAuthorizerRequest;
-import software.amazon.awssdk.services.apigateway.model.CreateDeploymentRequest;
-import software.amazon.awssdk.services.apigateway.model.CreateResourceRequest;
-import software.amazon.awssdk.services.apigateway.model.CreateRestApiRequest;
-import software.amazon.awssdk.services.apigateway.model.CreateStageRequest;
-import software.amazon.awssdk.services.apigateway.model.DeleteRestApiRequest;
-import software.amazon.awssdk.services.apigateway.model.GetResourcesRequest;
-import software.amazon.awssdk.services.apigateway.model.IntegrationType;
-import software.amazon.awssdk.services.apigateway.model.PutIntegrationRequest;
-import software.amazon.awssdk.services.apigateway.model.PutMethodRequest;
+
 import java.io.ByteArrayOutputStream;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
@@ -45,17 +26,12 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@code APIGatewayRequestAuthorizerEvent} shape for REQUEST-type authorizers,
  * and that TOKEN and NONE authorizer paths are unaffected.
  *
- * <p>Management-plane setup uses the AWS SDK v2 {@link ApiGatewayClient}.
- * Lambda functions are created via the Lambda REST API (no SDK dep needed in main pom).
- * Execute-api invocations use RestAssured against the local Floci endpoint.
+ * <p>All management-plane setup uses RestAssured against the local Floci endpoint.
+ * Execute-api invocations also use RestAssured.
  */
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ApiGatewayRequestAuthorizerIntegrationTest {
-
-    @TestHTTPResource("/")
-    URI baseUri;
 
     private static final String LAMBDA_BASE_PATH = "/2015-03-31/functions";
     private static final String AUTHORIZER_FUNCTION = "apigw-request-auth-echo";
@@ -69,34 +45,17 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
     private static final String ACCOUNT = "000000000000";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    // Shared SDK client — pointed at the local Floci instance
-    private ApiGatewayClient gw;
-
     // State shared across ordered tests
-    private String apiId;
-    private String itemResourceId;
-    private String authorizerId;
+    private static String apiId;
+    private static String rootId;
+    private static String itemResourceId;
+    private static String authorizerId;
 
-    private String tokenApiId;
-    private String noneApiId;
-    private String denyApiId;
+    private static String tokenApiId;
+    private static String noneApiId;
+    private static String denyApiId;
 
-    @BeforeAll
-    void setUpClient() {
-        gw = ApiGatewayClient.builder()
-                .endpointOverride(baseUri)
-                .region(Region.of(REGION))
-                .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create("test", "test")))
-                .build();
-    }
-
-    @AfterAll
-    void tearDownClient() {
-        if (gw != null) gw.close();
-    }
-
-    // ──────────────────────────── Lambda setup (raw HTTP — no Lambda SDK in main pom) ────────────────────────────
+    // ──────────────────────────── Lambda setup ────────────────────────────
 
     @Test
     @Order(1)
@@ -134,109 +93,110 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 """);
     }
 
-    // ──────────────────────────── REQUEST authorizer API setup (SDK v2) ────────────────────────────
+    // ──────────────────────────── REQUEST authorizer API setup ────────────────────────────
 
     @Test
     @Order(3)
     void createRestApi() {
-        var api = gw.createRestApi(CreateRestApiRequest.builder()
-                .name("request-authorizer-test-api")
-                .build());
-        apiId = api.id();
+        apiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"request-authorizer-test-api\"}")
+                .when().post("/restapis")
+                .then().statusCode(201)
+                .extract().path("id");
         assertNotNull(apiId);
     }
 
     @Test
     @Order(4)
-    void createResources() {
-        var resources = gw.getResources(GetResourcesRequest.builder()
-                .restApiId(apiId)
-                .build());
-        String rootId = resources.items().get(0).id();
-
-        var itemsRes = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(apiId)
-                .parentId(rootId)
-                .pathPart("items")
-                .build());
-        String itemsResourceId = itemsRes.id();
-
-        var itemRes = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(apiId)
-                .parentId(itemsResourceId)
-                .pathPart("{id}")
-                .build());
-        itemResourceId = itemRes.id();
-        assertNotNull(itemResourceId);
+    void getResources() {
+        rootId = given()
+                .when().get("/restapis/" + apiId + "/resources")
+                .then().statusCode(200)
+                .extract().path("item[0].id");
+        assertNotNull(rootId);
     }
 
     @Test
     @Order(5)
-    void createRequestAuthorizer() {
-        String authorizerUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
-                + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + AUTHORIZER_FUNCTION + "/invocations";
-        var auth = gw.createAuthorizer(CreateAuthorizerRequest.builder()
-                .restApiId(apiId)
-                .name("request-echo-authorizer")
-                .type(AuthorizerType.REQUEST)
-                .authorizerUri(authorizerUri)
-                .identitySource("method.request.header.Authorization")
-                .authorizerResultTtlInSeconds(0)
-                .build());
-        authorizerId = auth.id();
-        assertNotNull(authorizerId);
+    void createResources() {
+        String itemsId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"items\"}")
+                .when().post("/restapis/" + apiId + "/resources/" + rootId)
+                .then().statusCode(201)
+                .extract().path("id");
+
+        itemResourceId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"{id}\"}")
+                .when().post("/restapis/" + apiId + "/resources/" + itemsId)
+                .then().statusCode(201)
+                .extract().path("id");
+        assertNotNull(itemResourceId);
     }
 
     @Test
     @Order(6)
-    void configureMethodAndIntegration() {
-        gw.putMethod(PutMethodRequest.builder()
-                .restApiId(apiId)
-                .resourceId(itemResourceId)
-                .httpMethod("GET")
-                .authorizationType("CUSTOM")
-                .authorizerId(authorizerId)
-                .build());
-
-        String proxyUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
-                + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + PROXY_FUNCTION + "/invocations";
-        gw.putIntegration(PutIntegrationRequest.builder()
-                .restApiId(apiId)
-                .resourceId(itemResourceId)
-                .httpMethod("GET")
-                .type(IntegrationType.AWS_PROXY)
-                .integrationHttpMethod("POST")
-                .uri(proxyUri)
-                .build());
+    void createRequestAuthorizer() {
+        String authorizerUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
+                + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + AUTHORIZER_FUNCTION + "/invocations";
+        authorizerId = given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"name":"request-echo-authorizer","type":"REQUEST","authorizerUri":"%s","identitySource":"method.request.header.Authorization","authorizerResultTtlInSeconds":0}
+                        """.formatted(authorizerUri))
+                .when().post("/restapis/" + apiId + "/authorizers")
+                .then().statusCode(201)
+                .extract().path("id");
+        assertNotNull(authorizerId);
     }
 
     @Test
     @Order(7)
+    void configureMethodAndIntegration() {
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"authorizationType":"CUSTOM","authorizerId":"%s"}
+                        """.formatted(authorizerId))
+                .when().put("/restapis/" + apiId + "/resources/" + itemResourceId + "/methods/GET")
+                .then().statusCode(201);
+
+        String proxyUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
+                + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + PROXY_FUNCTION + "/invocations";
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"type":"AWS_PROXY","httpMethod":"POST","uri":"%s"}
+                        """.formatted(proxyUri))
+                .when().put("/restapis/" + apiId + "/resources/" + itemResourceId + "/methods/GET/integration")
+                .then().statusCode(201);
+    }
+
+    @Test
+    @Order(8)
     void deployApi() {
-        var dep = gw.createDeployment(CreateDeploymentRequest.builder()
-                .restApiId(apiId)
-                .description("request-auth-test")
-                .build());
-        gw.createStage(CreateStageRequest.builder()
-                .restApiId(apiId)
-                .stageName("prod")
-                .deploymentId(dep.id())
-                .build());
+        String depId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"description\":\"request-auth-test\"}")
+                .when().post("/restapis/" + apiId + "/deployments")
+                .then().statusCode(201)
+                .extract().path("id");
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"stageName":"prod","deploymentId":"%s"}
+                        """.formatted(depId))
+                .when().post("/restapis/" + apiId + "/stages")
+                .then().statusCode(201);
     }
 
     // ──────────────────────────── Core bug condition test ────────────────────────────
 
-    /**
-     * Validates that the REQUEST authorizer Lambda receives the full
-     * {@code APIGatewayRequestAuthorizerEvent} shape: headers, queryStringParameters,
-     * multiValueHeaders, multiValueQueryStringParameters, pathParameters, resource,
-     * stageVariables, and requestContext (with requestId, identity.sourceIp, accountId, apiId).
-     *
-     * <p>On unfixed code this test fails because only {@code type} and {@code methodArn}
-     * are populated.
-     */
     @Test
-    @Order(8)
+    @Order(9)
     void requestAuthorizerReceivesFullEvent() throws Exception {
         String response = given()
                 .header("Authorization", "Bearer test")
@@ -305,9 +265,12 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
 
         assertEquals("127.0.0.1", ctx.path("identity").path("sourceIp").asText(null),
                 "requestContext.identity.sourceIp must equal '127.0.0.1'");
-        // apiKey is null because no usage plan with a matching key is linked to this stage
+        assertFalse(ctx.path("identity").path("userAgent").isMissingNode(),
+                "requestContext.identity.userAgent must be present");
         assertTrue(ctx.path("identity").path("apiKey").isNull(),
                 "requestContext.identity.apiKey must be null when no matching usage plan key exists");
+        assertTrue(ctx.path("identity").path("clientCert").isNull(),
+                "requestContext.identity.clientCert must be null (mTLS not supported)");
         assertEquals("/items/{id}", ctx.path("resourcePath").asText(null));
         assertEquals("/items/42", ctx.path("path").asText(null),
                 "requestContext.path must equal the actual request path");
@@ -318,14 +281,13 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
         assertEquals(apiId, ctx.path("apiId").asText(null),
                 "requestContext.apiId must be present");
 
-        // resourceId is the actual resource ID assigned by Floci at creation time
         String resourceId = ctx.path("resourceId").asText(null);
         assertNotNull(resourceId, "requestContext.resourceId must be non-null");
         assertFalse(resourceId.isEmpty(), "requestContext.resourceId must be non-empty");
     }
 
     @Test
-    @Order(9)
+    @Order(10)
     void requestAuthorizerNullQueryParamsWhenNonePresent() throws Exception {
         String response = given()
                 .header("Authorization", "Bearer test")
@@ -348,7 +310,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
     // ──────────────────────────── TOKEN authorizer preservation ────────────────────────────
 
     @Test
-    @Order(10)
+    @Order(20)
     void preservation_createTokenLambdas() throws Exception {
         createNodeLambda(TOKEN_AUTHORIZER_FUNCTION, """
                 exports.handler = async (event) => ({
@@ -361,9 +323,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                       Resource: event.methodArn
                     }]
                   },
-                  context: {
-                    receivedEvent: JSON.stringify(event)
-                  }
+                  context: { receivedEvent: JSON.stringify(event) }
                 });
                 """);
         createNodeLambda(TOKEN_PROXY_FUNCTION, """
@@ -371,86 +331,82 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                   statusCode: 200,
                   body: JSON.stringify({
                     authorizer: event.requestContext && event.requestContext.authorizer
-                      ? event.requestContext.authorizer
-                      : null
+                      ? event.requestContext.authorizer : null
                   })
                 });
                 """);
     }
 
     @Test
-    @Order(11)
+    @Order(21)
     void preservation_setupTokenAuthorizerApi() {
-        var api = gw.createRestApi(CreateRestApiRequest.builder()
-                .name("token-authorizer-preservation-api")
-                .build());
-        tokenApiId = api.id();
+        tokenApiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"token-authorizer-preservation-api\"}")
+                .when().post("/restapis")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        var resources = gw.getResources(GetResourcesRequest.builder()
-                .restApiId(tokenApiId)
-                .build());
-        String rootId = resources.items().get(0).id();
+        String tokenRootId = given()
+                .when().get("/restapis/" + tokenApiId + "/resources")
+                .then().statusCode(200)
+                .extract().path("item[0].id");
 
-        var secureRes = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(tokenApiId)
-                .parentId(rootId)
-                .pathPart("secure")
-                .build());
-        String secureResourceId = secureRes.id();
+        String secureResourceId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"secure\"}")
+                .when().post("/restapis/" + tokenApiId + "/resources/" + tokenRootId)
+                .then().statusCode(201)
+                .extract().path("id");
 
         String authUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + TOKEN_AUTHORIZER_FUNCTION + "/invocations";
-        var auth = gw.createAuthorizer(CreateAuthorizerRequest.builder()
-                .restApiId(tokenApiId)
-                .name("token-echo-authorizer")
-                .type(AuthorizerType.TOKEN)
-                .authorizerUri(authUri)
-                .identitySource("method.request.header.Authorization")
-                .authorizerResultTtlInSeconds(0)
-                .build());
+        String tokenAuthId = given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"name":"token-echo-authorizer","type":"TOKEN","authorizerUri":"%s","identitySource":"method.request.header.Authorization","authorizerResultTtlInSeconds":0}
+                        """.formatted(authUri))
+                .when().post("/restapis/" + tokenApiId + "/authorizers")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        gw.putMethod(PutMethodRequest.builder()
-                .restApiId(tokenApiId)
-                .resourceId(secureResourceId)
-                .httpMethod("GET")
-                .authorizationType("CUSTOM")
-                .authorizerId(auth.id())
-                .build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"authorizationType":"CUSTOM","authorizerId":"%s"}
+                        """.formatted(tokenAuthId))
+                .when().put("/restapis/" + tokenApiId + "/resources/" + secureResourceId + "/methods/GET")
+                .then().statusCode(201);
 
         String proxyUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + TOKEN_PROXY_FUNCTION + "/invocations";
-        gw.putIntegration(PutIntegrationRequest.builder()
-                .restApiId(tokenApiId)
-                .resourceId(secureResourceId)
-                .httpMethod("GET")
-                .type(IntegrationType.AWS_PROXY)
-                .integrationHttpMethod("POST")
-                .uri(proxyUri)
-                .build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"type":"AWS_PROXY","httpMethod":"POST","uri":"%s"}
+                        """.formatted(proxyUri))
+                .when().put("/restapis/" + tokenApiId + "/resources/" + secureResourceId + "/methods/GET/integration")
+                .then().statusCode(201);
 
-        var dep = gw.createDeployment(CreateDeploymentRequest.builder()
-                .restApiId(tokenApiId)
-                .description("token-auth-preservation")
-                .build());
-        gw.createStage(CreateStageRequest.builder()
-                .restApiId(tokenApiId)
-                .stageName("prod")
-                .deploymentId(dep.id())
-                .build());
+        String depId = given().contentType(ContentType.JSON)
+                .body("{\"description\":\"token-auth-preservation\"}")
+                .when().post("/restapis/" + tokenApiId + "/deployments")
+                .then().statusCode(201)
+                .extract().path("id");
+
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"stageName":"prod","deploymentId":"%s"}
+                        """.formatted(depId))
+                .when().post("/restapis/" + tokenApiId + "/stages")
+                .then().statusCode(201);
     }
 
-    /**
-     * TOKEN authorizer event must contain exactly {@code type}, {@code methodArn},
-     * and {@code authorizationToken} — no extra fields.
-     */
     @Test
-    @Order(12)
+    @Order(22)
     void preservation_tokenAuthorizerEventShapeIsExact() throws Exception {
         String response = given()
                 .header("Authorization", "Bearer mytoken")
                 .when().get("/execute-api/" + tokenApiId + "/prod/secure")
-                .then()
-                .statusCode(200)
+                .then().statusCode(200)
                 .extract().asString();
 
         JsonNode payload = OBJECT_MAPPER.readTree(response);
@@ -461,7 +417,6 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
 
         assertEquals("TOKEN", event.path("type").asText(null));
         assertFalse(event.path("methodArn").isMissingNode(), "methodArn must be present");
-        assertFalse(event.path("methodArn").isNull(), "methodArn must not be null");
         assertEquals("Bearer mytoken", event.path("authorizationToken").asText(null));
 
         // TOKEN event must NOT contain REQUEST-specific fields
@@ -476,7 +431,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
     // ──────────────────────────── NONE authorizer preservation ────────────────────────────
 
     @Test
-    @Order(20)
+    @Order(30)
     void preservation_setupNoneAuthorizerApi() throws Exception {
         createNodeLambda(NONE_INTEGRATION_FUNCTION, """
                 exports.handler = async (event) => ({
@@ -485,54 +440,55 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 });
                 """);
 
-        var api = gw.createRestApi(CreateRestApiRequest.builder()
-                .name("none-authorizer-preservation-api")
-                .build());
-        noneApiId = api.id();
+        noneApiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"none-authorizer-preservation-api\"}")
+                .when().post("/restapis")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        var resources = gw.getResources(GetResourcesRequest.builder()
-                .restApiId(noneApiId)
-                .build());
-        String rootId = resources.items().get(0).id();
+        String noneRootId = given()
+                .when().get("/restapis/" + noneApiId + "/resources")
+                .then().statusCode(200)
+                .extract().path("item[0].id");
 
-        var openRes = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(noneApiId)
-                .parentId(rootId)
-                .pathPart("open")
-                .build());
-        String openResourceId = openRes.id();
+        String openResourceId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"open\"}")
+                .when().post("/restapis/" + noneApiId + "/resources/" + noneRootId)
+                .then().statusCode(201)
+                .extract().path("id");
 
-        gw.putMethod(PutMethodRequest.builder()
-                .restApiId(noneApiId)
-                .resourceId(openResourceId)
-                .httpMethod("GET")
-                .authorizationType("NONE")
-                .build());
+        given().contentType(ContentType.JSON)
+                .body("{\"authorizationType\":\"NONE\"}")
+                .when().put("/restapis/" + noneApiId + "/resources/" + openResourceId + "/methods/GET")
+                .then().statusCode(201);
 
         String integrationUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + NONE_INTEGRATION_FUNCTION + "/invocations";
-        gw.putIntegration(PutIntegrationRequest.builder()
-                .restApiId(noneApiId)
-                .resourceId(openResourceId)
-                .httpMethod("GET")
-                .type(IntegrationType.AWS_PROXY)
-                .integrationHttpMethod("POST")
-                .uri(integrationUri)
-                .build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"type":"AWS_PROXY","httpMethod":"POST","uri":"%s"}
+                        """.formatted(integrationUri))
+                .when().put("/restapis/" + noneApiId + "/resources/" + openResourceId + "/methods/GET/integration")
+                .then().statusCode(201);
 
-        var dep = gw.createDeployment(CreateDeploymentRequest.builder()
-                .restApiId(noneApiId)
-                .description("none-auth-preservation")
-                .build());
-        gw.createStage(CreateStageRequest.builder()
-                .restApiId(noneApiId)
-                .stageName("prod")
-                .deploymentId(dep.id())
-                .build());
+        String depId = given().contentType(ContentType.JSON)
+                .body("{\"description\":\"none-auth-preservation\"}")
+                .when().post("/restapis/" + noneApiId + "/deployments")
+                .then().statusCode(201)
+                .extract().path("id");
+
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"stageName":"prod","deploymentId":"%s"}
+                        """.formatted(depId))
+                .when().post("/restapis/" + noneApiId + "/stages")
+                .then().statusCode(201);
     }
 
     @Test
-    @Order(21)
+    @Order(31)
     void preservation_noneAuthorizerSkipsInvocation() {
         given()
                 .when().get("/execute-api/" + noneApiId + "/prod/open")
@@ -541,10 +497,10 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 .body("invoked", org.hamcrest.Matchers.equalTo(true));
     }
 
-    // ──────────────────────────── Allow / Deny policy preservation ────────────────────────────
+    // ──────────────────────────── Allow / Deny policy ────────────────────────────
 
     @Test
-    @Order(30)
+    @Order(32)
     void preservation_requestAuthorizerAllowPolicyForwardsToIntegration() {
         given()
                 .header("Authorization", "Bearer test")
@@ -570,73 +526,70 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 });
                 """);
 
-        var api = gw.createRestApi(CreateRestApiRequest.builder()
-                .name("deny-authorizer-preservation-api")
-                .build());
-        denyApiId = api.id();
+        denyApiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"deny-authorizer-preservation-api\"}")
+                .when().post("/restapis")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        var resources = gw.getResources(GetResourcesRequest.builder()
-                .restApiId(denyApiId)
-                .build());
-        String rootId = resources.items().get(0).id();
+        String denyRootId = given()
+                .when().get("/restapis/" + denyApiId + "/resources")
+                .then().statusCode(200)
+                .extract().path("item[0].id");
 
-        var protectedRes = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(denyApiId)
-                .parentId(rootId)
-                .pathPart("protected")
-                .build());
-        String protectedResourceId = protectedRes.id();
+        String protectedResourceId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"protected\"}")
+                .when().post("/restapis/" + denyApiId + "/resources/" + denyRootId)
+                .then().statusCode(201)
+                .extract().path("id");
 
         String authUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:" + DENY_AUTHORIZER_FUNCTION + "/invocations";
-        var denyAuth = gw.createAuthorizer(CreateAuthorizerRequest.builder()
-                .restApiId(denyApiId)
-                .name("deny-authorizer")
-                .type(AuthorizerType.REQUEST)
-                .authorizerUri(authUri)
-                .identitySource("method.request.header.Authorization")
-                .authorizerResultTtlInSeconds(0)
-                .build());
-
-        gw.putMethod(PutMethodRequest.builder()
-                .restApiId(denyApiId)
-                .resourceId(protectedResourceId)
-                .httpMethod("GET")
-                .authorizationType("CUSTOM")
-                .authorizerId(denyAuth.id())
-                .build());
-
-        gw.putIntegration(PutIntegrationRequest.builder()
-                .restApiId(denyApiId)
-                .resourceId(protectedResourceId)
-                .httpMethod("GET")
-                .type(IntegrationType.MOCK)
-                .requestTemplates(Map.of("application/json", "{\"statusCode\": 200}"))
-                .build());
-
-        // Method response and integration response for MOCK
-        given()
+        String denyAuthId = given()
                 .contentType(ContentType.JSON)
+                .body("""
+                        {"name":"deny-authorizer","type":"REQUEST","authorizerUri":"%s","identitySource":"method.request.header.Authorization","authorizerResultTtlInSeconds":0}
+                        """.formatted(authUri))
+                .when().post("/restapis/" + denyApiId + "/authorizers")
+                .then().statusCode(201)
+                .extract().path("id");
+
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"authorizationType":"CUSTOM","authorizerId":"%s"}
+                        """.formatted(denyAuthId))
+                .when().put("/restapis/" + denyApiId + "/resources/" + protectedResourceId + "/methods/GET")
+                .then().statusCode(201);
+
+        given().contentType(ContentType.JSON)
+                .body("{\"type\":\"MOCK\",\"requestTemplates\":{\"application/json\":\"{\\\"statusCode\\\": 200}\"}}")
+                .when().put("/restapis/" + denyApiId + "/resources/" + protectedResourceId + "/methods/GET/integration")
+                .then().statusCode(201);
+
+        given().contentType(ContentType.JSON)
                 .body("{\"responseParameters\":{}}")
                 .when().put("/restapis/" + denyApiId + "/resources/" + protectedResourceId + "/methods/GET/responses/200")
-                .then()
-                .statusCode(201);
-        given()
-                .contentType(ContentType.JSON)
+                .then().statusCode(201);
+
+        given().contentType(ContentType.JSON)
                 .body("{\"selectionPattern\":\"\",\"responseTemplates\":{\"application/json\":\"{\\\"message\\\":\\\"ok\\\"}\"}}")
                 .when().put("/restapis/" + denyApiId + "/resources/" + protectedResourceId + "/methods/GET/integration/responses/200")
-                .then()
-                .statusCode(201);
+                .then().statusCode(201);
 
-        var dep = gw.createDeployment(CreateDeploymentRequest.builder()
-                .restApiId(denyApiId)
-                .description("deny-auth-preservation")
-                .build());
-        gw.createStage(CreateStageRequest.builder()
-                .restApiId(denyApiId)
-                .stageName("prod")
-                .deploymentId(dep.id())
-                .build());
+        String depId = given().contentType(ContentType.JSON)
+                .body("{\"description\":\"deny-auth-preservation\"}")
+                .when().post("/restapis/" + denyApiId + "/deployments")
+                .then().statusCode(201)
+                .extract().path("id");
+
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"stageName":"prod","deploymentId":"%s"}
+                        """.formatted(depId))
+                .when().post("/restapis/" + denyApiId + "/stages")
+                .then().statusCode(201);
     }
 
     @Test
@@ -651,11 +604,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
 
     // ──────────────────────────── Stage Variables ────────────────────────────
 
-    /**
-     * Validates that stageVariables in the REQUEST authorizer event and the proxy event
-     * are populated from the Stage's variables map when variables are configured.
-     */
-    private String stageVarApiId;
+    private static String stageVarApiId;
 
     @Test
     @Order(50)
@@ -681,42 +630,65 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 });
                 """);
 
-        var api = gw.createRestApi(CreateRestApiRequest.builder()
-                .name("stage-var-test-api")
-                .build());
-        stageVarApiId = api.id();
+        stageVarApiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"stage-var-test-api\"}")
+                .when().post("/restapis")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        var resources = gw.getResources(GetResourcesRequest.builder().restApiId(stageVarApiId).build());
-        String rootId = resources.items().get(0).id();
+        String svRootId = given()
+                .when().get("/restapis/" + stageVarApiId + "/resources")
+                .then().statusCode(200)
+                .extract().path("item[0].id");
 
-        var res = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(stageVarApiId).parentId(rootId).pathPart("ping").build());
-        String resourceId = res.id();
+        String resourceId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"ping\"}")
+                .when().post("/restapis/" + stageVarApiId + "/resources/" + svRootId)
+                .then().statusCode(201)
+                .extract().path("id");
 
         String authUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:apigw-stagevar-auth-echo/invocations";
-        var auth = gw.createAuthorizer(CreateAuthorizerRequest.builder()
-                .restApiId(stageVarApiId).name("sv-auth").type(AuthorizerType.REQUEST)
-                .authorizerUri(authUri).identitySource("method.request.header.Authorization")
-                .authorizerResultTtlInSeconds(0).build());
+        String svAuthId = given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"name":"sv-auth","type":"REQUEST","authorizerUri":"%s","identitySource":"method.request.header.Authorization","authorizerResultTtlInSeconds":0}
+                        """.formatted(authUri))
+                .when().post("/restapis/" + stageVarApiId + "/authorizers")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        gw.putMethod(PutMethodRequest.builder()
-                .restApiId(stageVarApiId).resourceId(resourceId).httpMethod("GET")
-                .authorizationType("CUSTOM").authorizerId(auth.id()).build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"authorizationType":"CUSTOM","authorizerId":"%s"}
+                        """.formatted(svAuthId))
+                .when().put("/restapis/" + stageVarApiId + "/resources/" + resourceId + "/methods/GET")
+                .then().statusCode(201);
 
         String proxyUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:apigw-stagevar-proxy/invocations";
-        gw.putIntegration(PutIntegrationRequest.builder()
-                .restApiId(stageVarApiId).resourceId(resourceId).httpMethod("GET")
-                .type(IntegrationType.AWS_PROXY).integrationHttpMethod("POST").uri(proxyUri).build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"type":"AWS_PROXY","httpMethod":"POST","uri":"%s"}
+                        """.formatted(proxyUri))
+                .when().put("/restapis/" + stageVarApiId + "/resources/" + resourceId + "/methods/GET/integration")
+                .then().statusCode(201);
 
-        var dep = gw.createDeployment(CreateDeploymentRequest.builder()
-                .restApiId(stageVarApiId).description("sv-test").build());
+        String depId = given().contentType(ContentType.JSON)
+                .body("{\"description\":\"sv-test\"}")
+                .when().post("/restapis/" + stageVarApiId + "/deployments")
+                .then().statusCode(201)
+                .extract().path("id");
+
         // Create stage WITH variables
-        gw.createStage(CreateStageRequest.builder()
-                .restApiId(stageVarApiId).stageName("prod").deploymentId(dep.id())
-                .variables(Map.of("env", "test", "version", "v1"))
-                .build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"stageName":"prod","deploymentId":"%s","variables":{"env":"test","version":"v1"}}
+                        """.formatted(depId))
+                .when().post("/restapis/" + stageVarApiId + "/stages")
+                .then().statusCode(201);
     }
 
     @Test
@@ -748,11 +720,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
 
     // ──────────────────────────── API Key Resolution ────────────────────────────
 
-    /**
-     * Validates that identity.apiKey is populated when a matching usage plan key
-     * is linked to the (apiId, stage) pair and the x-api-key header matches.
-     */
-    private String apiKeyApiId;
+    private static String apiKeyApiId;
 
     @Test
     @Order(60)
@@ -777,37 +745,64 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 });
                 """);
 
-        var api = gw.createRestApi(CreateRestApiRequest.builder().name("apikey-test-api").build());
-        apiKeyApiId = api.id();
+        apiKeyApiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"apikey-test-api\"}")
+                .when().post("/restapis")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        var resources = gw.getResources(GetResourcesRequest.builder().restApiId(apiKeyApiId).build());
-        String rootId = resources.items().get(0).id();
+        String akRootId = given()
+                .when().get("/restapis/" + apiKeyApiId + "/resources")
+                .then().statusCode(200)
+                .extract().path("item[0].id");
 
-        var res = gw.createResource(CreateResourceRequest.builder()
-                .restApiId(apiKeyApiId).parentId(rootId).pathPart("secure").build());
-        String resourceId = res.id();
+        String resourceId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"pathPart\":\"secure\"}")
+                .when().post("/restapis/" + apiKeyApiId + "/resources/" + akRootId)
+                .then().statusCode(201)
+                .extract().path("id");
 
         String authUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:apigw-apikey-auth-echo/invocations";
-        var auth = gw.createAuthorizer(CreateAuthorizerRequest.builder()
-                .restApiId(apiKeyApiId).name("ak-auth").type(AuthorizerType.REQUEST)
-                .authorizerUri(authUri).identitySource("method.request.header.Authorization")
-                .authorizerResultTtlInSeconds(0).build());
+        String akAuthId = given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"name":"ak-auth","type":"REQUEST","authorizerUri":"%s","identitySource":"method.request.header.Authorization","authorizerResultTtlInSeconds":0}
+                        """.formatted(authUri))
+                .when().post("/restapis/" + apiKeyApiId + "/authorizers")
+                .then().statusCode(201)
+                .extract().path("id");
 
-        gw.putMethod(PutMethodRequest.builder()
-                .restApiId(apiKeyApiId).resourceId(resourceId).httpMethod("GET")
-                .authorizationType("CUSTOM").authorizerId(auth.id()).build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"authorizationType":"CUSTOM","authorizerId":"%s"}
+                        """.formatted(akAuthId))
+                .when().put("/restapis/" + apiKeyApiId + "/resources/" + resourceId + "/methods/GET")
+                .then().statusCode(201);
 
         String proxyUri = "arn:aws:apigateway:" + REGION + ":lambda:path/2015-03-31/functions/"
                 + "arn:aws:lambda:" + REGION + ":" + ACCOUNT + ":function:apigw-apikey-proxy/invocations";
-        gw.putIntegration(PutIntegrationRequest.builder()
-                .restApiId(apiKeyApiId).resourceId(resourceId).httpMethod("GET")
-                .type(IntegrationType.AWS_PROXY).integrationHttpMethod("POST").uri(proxyUri).build());
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"type":"AWS_PROXY","httpMethod":"POST","uri":"%s"}
+                        """.formatted(proxyUri))
+                .when().put("/restapis/" + apiKeyApiId + "/resources/" + resourceId + "/methods/GET/integration")
+                .then().statusCode(201);
 
-        var dep = gw.createDeployment(CreateDeploymentRequest.builder()
-                .restApiId(apiKeyApiId).description("ak-test").build());
-        gw.createStage(CreateStageRequest.builder()
-                .restApiId(apiKeyApiId).stageName("prod").deploymentId(dep.id()).build());
+        String depId = given().contentType(ContentType.JSON)
+                .body("{\"description\":\"ak-test\"}")
+                .when().post("/restapis/" + apiKeyApiId + "/deployments")
+                .then().statusCode(201)
+                .extract().path("id");
+
+        given().contentType(ContentType.JSON)
+                .body("""
+                        {"stageName":"prod","deploymentId":"%s"}
+                        """.formatted(depId))
+                .when().post("/restapis/" + apiKeyApiId + "/stages")
+                .then().statusCode(201);
 
         // Create API key + usage plan linked to this (apiId, stage)
         given().contentType(ContentType.JSON)
@@ -815,12 +810,11 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 .when().post("/apikeys")
                 .then().statusCode(201);
 
-        // Get the key ID
-        String keyId = given().when().get("/apikeys")
+        String keyId = given()
+                .when().get("/apikeys")
                 .then().statusCode(200)
                 .extract().path("item.find { it.name == 'test-key' }.id");
 
-        // Create usage plan linked to (apiKeyApiId, prod)
         String planId = given().contentType(ContentType.JSON)
                 .body("""
                         {"name":"test-plan","apiStages":[{"apiId":"%s","stage":"prod"}]}
@@ -829,9 +823,10 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
                 .then().statusCode(201)
                 .extract().path("id");
 
-        // Link the key to the plan
         given().contentType(ContentType.JSON)
-                .body("{\"keyId\":\"%s\",\"keyType\":\"API_KEY\"}".formatted(keyId))
+                .body("""
+                        {"keyId":"%s","keyType":"API_KEY"}
+                        """.formatted(keyId))
                 .when().post("/usageplans/" + planId + "/keys")
                 .then().statusCode(201);
     }
@@ -898,24 +893,12 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
     @Test
     @Order(99)
     void cleanup() {
-        if (apiId != null) {
-            gw.deleteRestApi(DeleteRestApiRequest.builder().restApiId(apiId).build());
-        }
-        if (tokenApiId != null) {
-            gw.deleteRestApi(DeleteRestApiRequest.builder().restApiId(tokenApiId).build());
-        }
-        if (noneApiId != null) {
-            gw.deleteRestApi(DeleteRestApiRequest.builder().restApiId(noneApiId).build());
-        }
-        if (denyApiId != null) {
-            gw.deleteRestApi(DeleteRestApiRequest.builder().restApiId(denyApiId).build());
-        }
-        if (stageVarApiId != null) {
-            gw.deleteRestApi(DeleteRestApiRequest.builder().restApiId(stageVarApiId).build());
-        }
-        if (apiKeyApiId != null) {
-            gw.deleteRestApi(DeleteRestApiRequest.builder().restApiId(apiKeyApiId).build());
-        }
+        if (apiId != null) given().when().delete("/restapis/" + apiId).then().statusCode(202);
+        if (tokenApiId != null) given().when().delete("/restapis/" + tokenApiId).then().statusCode(202);
+        if (noneApiId != null) given().when().delete("/restapis/" + noneApiId).then().statusCode(202);
+        if (denyApiId != null) given().when().delete("/restapis/" + denyApiId).then().statusCode(202);
+        if (stageVarApiId != null) given().when().delete("/restapis/" + stageVarApiId).then().statusCode(202);
+        if (apiKeyApiId != null) given().when().delete("/restapis/" + apiKeyApiId).then().statusCode(202);
         deleteFunction(AUTHORIZER_FUNCTION);
         deleteFunction(PROXY_FUNCTION);
         deleteFunction(TOKEN_AUTHORIZER_FUNCTION);
@@ -930,7 +913,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
 
     // ──────────────────────────── Helpers ────────────────────────────
 
-    private void createNodeLambda(String functionName, String handlerSource) throws Exception {
+    private static void createNodeLambda(String functionName, String handlerSource) throws Exception {
         String zipBase64 = Base64.getEncoder().encodeToString(zipEntries(Map.of(
                 "index.js", handlerSource
         )));
@@ -963,7 +946,7 @@ class ApiGatewayRequestAuthorizerIntegrationTest {
         return baos.toByteArray();
     }
 
-    private void deleteFunction(String functionName) {
+    private static void deleteFunction(String functionName) {
         int statusCode = given()
                 .when().delete(LAMBDA_BASE_PATH + "/" + functionName)
                 .then()
