@@ -517,7 +517,10 @@ public class CloudFormationResourceProvisioner {
         }
         for (JsonNode value : values) {
             if (value != null && !value.isNull()) {
-                xml.elem(elementName, engine.resolve(value));
+                String resolved = engine.resolve(value);
+                if (resolved != null && !resolved.isBlank()) {
+                    xml.elem(elementName, resolved);
+                }
             }
         }
     }

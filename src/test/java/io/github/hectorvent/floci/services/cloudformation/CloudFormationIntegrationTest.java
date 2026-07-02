@@ -225,6 +225,51 @@ class CloudFormationIntegrationTest {
     }
 
     @Test
+    void createStack_s3BucketCorsConfigurationSkipsBlankListValues() {
+        String template = """
+            {
+              "Resources": {
+                "MyBucket": {
+                  "Type": "AWS::S3::Bucket",
+                  "Properties": {
+                    "BucketName": "cfn-cors-blank-bucket",
+                    "CorsConfiguration": {
+                      "CorsRules": [
+                        {
+                          "AllowedHeaders": ["x-real-header", ""],
+                          "AllowedMethods": ["GET"],
+                          "AllowedOrigins": ["https://app.example.com"]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack")
+            .formParam("StackName", "cfn-cors-blank-stack")
+            .formParam("TemplateBody", template)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<StackId>"));
+
+        // A blank list entry must be skipped rather than emitted as an empty (invalid) element.
+        given()
+        .when()
+            .get("/cfn-cors-blank-bucket?cors")
+        .then()
+            .statusCode(200)
+            .body(containsString("<AllowedHeader>x-real-header</AllowedHeader>"))
+            .body(not(containsString("<AllowedHeader></AllowedHeader>")));
+    }
+
+    @Test
     void updateStack_s3BucketCorsConfigurationIsReconciled() {
         String stackName = "cfn-cors-update-stack";
         String bucketName = "cfn-cors-update-bucket";
